@@ -167,7 +167,7 @@ vertical_seed
    → qualified_leads.json     (≤3 angles total — Policy 5)
 ```
 
-`secured_calculator` is an auxiliary tool the agent may call at any step (e.g. pricing math under Policy 3) and **must never** use `eval`/`exec`.
+`secured_calculator` is an auxiliary tool the agent may call at any step (e.g. risk/pricing math) and **must never** use `eval`/`exec`.
 
 ### 3.2 Runtime I/O
 
@@ -211,7 +211,7 @@ Column meanings that drive logic:
 - `Core_Category` — multi-tier path, e.g. `Apparel > Athleisure > Sustainable` (this is the `category_path` fed to `match_solicitation_angle`).
 - `Estimated_Ad_Spend_Tier` ∈ {`Tier 1` = $5M+, `Tier 2` = $1M–$5M, `Tier 3` = <$1M}.
 - `Current_Status` ∈ {`Active_Client`, `Open_Opportunity`, `Unreached_Prospect`, `Blacklisted`} — **`Blacklisted` brands are excluded from outreach.**
-- `Historical_Social_Incidents` — integer count of past viral/PR crises (Policy 3 compares `> 5`).
+- `Historical_Social_Incidents` — integer count of past viral/PR crises.
 
 Compliance rules (enforced by checks `CAT1`–`CAT5`):
 
@@ -382,7 +382,7 @@ The deliverable spans a few modules, but each must read like a well-factored uni
 5.  Tool implementations     # the 8 functions, one logical block each
 6.  Tool schemas             # TOOL_SCHEMAS (names == function names)
 7.  Dispatch table           # TOOL_DISPATCH = {name: fn}
-8.  Gateway + policies        # gateway validator, Policy 3/5/6 enforcement helpers
+8.  Gateway + policies        # gateway validator, Policy 5/6 enforcement helpers
 9.  Logging helpers           # dual-write logger, truncation helper, call-metrics
 10. Agentic loop              # answer_question(query, ...) with the 15-call cap + resiliency + termination precedence
 11. I/O + main()              # load the 3 inputs, take the query, run answer_question, write artifacts, guard with try/except
@@ -429,7 +429,7 @@ TOOL_DISPATCH = {"generate_search_queries": generate_search_queries, ...}
 ```
 
 - Tool function name == schema name == dispatch key. A mismatch breaks dispatch correctness — guard it with an import-time `assert`.
-- Avoid vague names (`tmp`, `res2`, `do_thing`). Helpers say what they do (`gateway_validate`, `apply_premium`, `cap_angles`, `dual_log`, `truncate_for_log`).
+- Avoid vague names (`tmp`, `res2`, `do_thing`). Helpers say what they do (`gateway_validate`, `cap_angles`, `dual_log`, `truncate_for_log`).
 
 ---
 
