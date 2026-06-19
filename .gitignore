@@ -1,0 +1,24 @@
+# Virtual environment
+.venv/
+
+# Chroma vector store (machine-local, lazy-built)
+.chroma/
+
+# Runtime artifacts
+assets/
+reactfirst_run.log
+qualified_leads.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Synthetic dev fixtures (not shipped)
+brands_catalog.csv
+contacts.json
+gtm_policies.txt
+
+# macOS
+.DS_Store

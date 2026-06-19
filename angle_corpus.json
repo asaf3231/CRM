@@ -1,0 +1,86 @@
+[
+  {
+    "id": "crisis_social_media_001",
+    "angle_key": "crisis_social_media_001",
+    "text": "Apparel brand facing viral social media backlash over quality complaints and misleading advertising. Brand controversy spread rapidly across TikTok and Instagram, causing significant reputation damage. Reactive crisis management failed to contain the narrative. ReactFirst intervention: proactive narrative reframing campaign with authenticated user testimonials and transparent quality audit results. Meta Pixel and TikTok Pixel tracking confirmed. Performance marketing disrupted by brand safety controls.",
+    "category_hint": "Apparel > Athleisure > Sustainable",
+    "tier_label": "Critical Fit"
+  },
+  {
+    "id": "crisis_pr_reputation_002",
+    "angle_key": "crisis_pr_reputation_002",
+    "text": "Direct-to-consumer fashion brand suffered a PR crisis after supply chain labor practices went viral. Paid social advertising campaigns were paused by platform trust-and-safety teams. Brand marketing team struggled to restore consumer confidence. ReactFirst approach: rapid-response value-hook narrative anchored on verified ethical sourcing data, distributed through performance marketing channels. Google Tag Manager, Facebook Pixel active. Ad spend recovery through targeted reactivation.",
+    "category_hint": "Apparel > Fashion > DTC",
+    "tier_label": "Critical Fit"
+  },
+  {
+    "id": "crisis_product_recall_003",
+    "angle_key": "crisis_product_recall_003",
+    "text": "Consumer electronics brand experienced a product recall crisis amplified by paid social advertising still running during the incident. TikTok and Instagram ads continued serving during the controversy, worsening brand reputation. Brand manager and CMO escalated internally. ReactFirst intervention: automated pause-and-pivot system for outreach campaigns, replacing crisis-adjacent ad creative with value-driven content. E-commerce DTC channels affected. Shopify store traffic impacted.",
+    "category_hint": "Electronics > Consumer > E-commerce",
+    "tier_label": "Critical Fit"
+  },
+  {
+    "id": "crisis_influencer_scandal_004",
+    "angle_key": "crisis_influencer_scandal_004",
+    "text": "Health and wellness DTC brand suffered reputational damage after a key influencer partnership became controversial. Performance marketing ROAS dropped sharply. Meta Pixel data confirmed audience abandonment. The brand marketing team had insufficient crisis playbook for social media backlash scenarios. ReactFirst engagement: crisis narrative decoupling toolkit, enabling the brand to pivot ad spend away from compromised influencer channels toward authenticated brand storytelling. WooCommerce-backed e-commerce operation.",
+    "category_hint": "Health > Wellness > DTC",
+    "tier_label": "Critical Fit"
+  },
+  {
+    "id": "crisis_data_breach_005",
+    "angle_key": "crisis_data_breach_005",
+    "text": "Venture-backed growth-stage e-commerce platform experienced a customer data breach disclosed publicly. Paid social advertising spend was redirected to crisis-era awareness campaigns. Google Tag Manager event tracking captured customer disengagement patterns. VP Marketing and Head of Marketing scrambled for a rapid recovery strategy. ReactFirst solution: proactive trust-restoration outreach framework, with authenticated security-posture messaging for performance marketing recovery. Series B funded, rapid growth stage.",
+    "category_hint": "E-commerce > Platform > Growth",
+    "tier_label": "Strong Fit"
+  },
+  {
+    "id": "crisis_pricing_controversy_006",
+    "angle_key": "crisis_pricing_controversy_006",
+    "text": "Food and beverage brand faced a pricing controversy during an inflationary period. Social media backlash from consumers spread across Facebook and TikTok. Meta Pixel audience signals detected broad negative sentiment shift. Brand reputation team lacked a rapid outreach toolset to counter the viral controversy narrative. ReactFirst framework: pricing justification narrative delivery through targeted outbound campaigns restoring brand-consumer trust.",
+    "category_hint": "Food > Beverage > CPG",
+    "tier_label": "Strong Fit"
+  },
+  {
+    "id": "crisis_counterfeiting_007",
+    "angle_key": "crisis_counterfeiting_007",
+    "text": "Athletic footwear and apparel brand struggling with counterfeit product proliferation affecting brand perception on social media and DTC channels. BigCommerce store traffic impacted by counterfeit-driven negative reviews. Performance marketing budgets diverted to combating fake product narratives. CMO seeking a proactive outreach strategy to authenticate products and restore consumer confidence. ReactFirst anti-counterfeit narrative toolkit for paid social and outbound campaigns.",
+    "category_hint": "Apparel > Athletic > Footwear",
+    "tier_label": "Strong Fit"
+  },
+  {
+    "id": "crisis_leadership_departure_008",
+    "angle_key": "crisis_leadership_departure_008",
+    "text": "Growth-stage DTC brand lost its founding CMO publicly, triggering investor and consumer concern. Paid social advertising paused pending brand strategy reset. TikTok Pixel and Facebook Pixel showed audience churn. The interim brand marketing team needed rapid outreach continuity. ReactFirst transition support: automated campaign continuity framework that maintains brand narrative consistency during leadership transitions. Series A company, scaling rapidly.",
+    "category_hint": "Fashion > DTC > Growth",
+    "tier_label": "Watchlist"
+  },
+  {
+    "id": "crisis_competitor_attack_009",
+    "angle_key": "crisis_competitor_attack_009",
+    "text": "Sustainable beauty brand targeted by competitor-funded negative review campaigns across DTC channels. Facebook Pixel and Google Tag Manager data confirmed abnormal traffic patterns. Brand controversy manufactured through paid review placement. Brand manager escalated to growth lead. ReactFirst competitive defense playbook: proactive narrative shielding campaigns that amplify authentic brand positioning through performance marketing. Shopify DTC, product catalog depth across 200+ SKUs.",
+    "category_hint": "Beauty > Sustainable > DTC",
+    "tier_label": "Watchlist"
+  },
+  {
+    "id": "crisis_regulatory_action_010",
+    "angle_key": "crisis_regulatory_action_010",
+    "text": "Nutraceutical DTC brand facing regulatory scrutiny over product claims amplified on social media. Paid social advertising paused by compliance team. TikTok Pixel and Meta Pixel tracking showed audience drop-off. Brand marketing team needs rapid narrative repositioning framework. ReactFirst regulatory-resilience outreach: compliant claim-restructuring for outbound campaigns and performance marketing recovery. E-commerce DTC, WooCommerce backend.",
+    "category_hint": "Health > Nutraceuticals > DTC",
+    "tier_label": "Watchlist"
+  },
+  {
+    "id": "watchlist_low_signal_011",
+    "angle_key": "watchlist_low_signal_011",
+    "text": "General retail brand monitoring social media sentiment. No significant crisis event detected. Advertising spend stable. No pixel tracking infrastructure identified. Brand marketing team not actively seeking crisis response solutions. Basic e-commerce presence. No strong indicators of immediate outreach opportunity.",
+    "category_hint": "Retail > General > Mass Market",
+    "tier_label": "Watchlist"
+  },
+  {
+    "id": "no_match_low_relevance_012",
+    "angle_key": "no_match_low_relevance_012",
+    "text": "Industrial manufacturing company with B2B sales model and no consumer-facing social media presence. No paid social advertising. No pixel tracking. No brand crisis history. No e-commerce DTC operation. Procurement-driven customer acquisition. Not a target for outbound brand crisis narrative intervention.",
+    "category_hint": "Manufacturing > Industrial > B2B",
+    "tier_label": "No Match"
+  }
+]
