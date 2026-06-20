@@ -149,6 +149,9 @@ def crm_lead_to_ui(record: dict) -> dict:
         "stage": record.get("stage", "discovered"),
         "tags": tags,
         "winProb": win_prob,
+        # Real RAG-matched angle tier (C14) — persisted at qualify-time (C13); None until a lead is
+        # (re)discovered with an angle. The leads table renders a Tier chip only when present.
+        "angleTier": (record["angle"].get("tier") if isinstance(record.get("angle"), dict) else None),
         # contact_ids intentionally OMITTED (INTG5)
         # corporate_access_key intentionally OMITTED (INTG5 / G4)
         # updated_at intentionally OMITTED

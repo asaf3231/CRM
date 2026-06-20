@@ -21,6 +21,27 @@ const FIT_RANK = { Strong: 3, Medium: 2, Weak: 1 } as const;
 const GOV_RANK = { "Heavy Gov": 3, "Light Gov": 2, "No Gov": 1 } as const;
 const LEAD_RANK = { Existing: 2, New: 1 } as const;
 
+const ANGLE_TIER_STYLE: Record<number, string> = {
+  1: "bg-primary/10 text-primary",
+  2: "bg-info/10 text-info",
+  3: "bg-muted text-muted-foreground",
+};
+
+/** Real RAG-matched solicitation-angle tier chip (C14). Tier 4 / absent → em dash. */
+function AngleTierBadge({ tier }: { tier?: number | null }) {
+  if (!tier || tier === 4) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+        ANGLE_TIER_STYLE[tier] ?? "bg-muted text-muted-foreground"
+      )}
+    >
+      Tier {tier}
+    </span>
+  );
+}
+
 export function LeadTable({
   leads,
   onRowClick,
@@ -90,6 +111,7 @@ export function LeadTable({
             <SortHead label="Fit" active={sortKey === "fit"} dir={sortDir} onClick={() => sort("fit")} />
             <SortHead label="Gov" active={sortKey === "gov"} dir={sortDir} onClick={() => sort("gov")} />
             <SortHead label="Lead" active={sortKey === "lead"} dir={sortDir} onClick={() => sort("lead")} />
+            <TableHead className="text-xs font-medium text-muted-foreground">Angle</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -137,6 +159,9 @@ export function LeadTable({
                 </TableCell>
                 <TableCell>
                   <LeadKindBadge kind={lead.kind} />
+                </TableCell>
+                <TableCell>
+                  <AngleTierBadge tier={lead.angleTier} />
                 </TableCell>
               </TableRow>
             );

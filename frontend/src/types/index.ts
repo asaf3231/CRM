@@ -29,6 +29,7 @@ export interface Lead {
   stage: LifecycleStage;
   tags: string[]; // ICP tags this lead matched
   winProb?: number; // 0-1, from compute_win_prob (catalog-sourced)
+  angleTier?: 1 | 2 | 3 | 4 | null; // RAG-matched solicitation-angle tier (null until discovered with an angle)
 }
 
 /**

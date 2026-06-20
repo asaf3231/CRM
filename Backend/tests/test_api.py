@@ -481,7 +481,7 @@ class TestINTG5AdapterThresholds:
             "contact_ids": [],
         }
         result = crm_lead_to_ui(record)
-        expected_keys = {"id", "company", "domain", "score", "fit", "gov", "kind", "stage", "tags", "winProb"}
+        expected_keys = {"id", "company", "domain", "score", "fit", "gov", "kind", "stage", "tags", "winProb", "angleTier"}
         assert set(result.keys()) == expected_keys, (
             f"Unexpected keys: {set(result.keys())} vs expected {expected_keys}"
         )
