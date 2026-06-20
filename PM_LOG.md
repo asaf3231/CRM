@@ -447,3 +447,27 @@ the new structure is final. If continuing the connection plan, C1 (DB-aware `/ap
 Watch out for / open: (1) Docker Mongo `reactfirst-mongo` still up on :27017 (now `docker compose` lives in
 `Backend/`). (2) Run the suite from cwd `Backend/` with the root `.venv`, `MONGO_URI` unset. (3) Everything
 remains uncommitted. (4) Frontend is a separate PM lane.
+
+## 2026-06-20 13:46 — [BACKEND] ADDENDUM (doc-drift reconciled)
+Reconciled the reorg doc-drift flagged in the 13:40 END entry (Asaf said "yes"): rewrote `CLAUDE.md` §2
+layout tree to the real monorepo shape (`Backend/` code subtree + root PM spine + `Plans/` + `frontend/`),
+fixed the §2 "LAYOUT UPDATE" banner's stale clause, and added a location note to `Backend/MANIFEST.txt`
+(allowlist paths are relative to `Backend/`; management files live at the repo root). Comment/tree-only —
+no code touched; packaging tests re-verified from `Backend/` (`tests/test_integration.py` 30 passed). The
+doc-drift item is now DONE.
+
+## 2026-06-20 13:56 — [BACKEND] SESSION END / HANDOFF (deploy scaffolding + CORS env-driven)
+Did: Added deploy files for hosting — **`Backend/Dockerfile`** (python:3.10-slim + build-essential/libgomp1,
+`uvicorn api_server:app` on `$PORT`), **`Backend/.dockerignore`** (excludes `.env`/`.chroma`/logs/tests — no
+secrets baked), **`Backend/railway.json`** (Dockerfile builder), and **`frontend/vercel.json`** (rewrites
+`/api/*` → Railway backend, placeholder host to fill in). Made **CORS env-driven**: `api_server.py` now reads
+`ALLOWED_ORIGINS` (comma-separated, default `http://localhost:5173`) — verified default keeps the existing
+CORS tests green + override applies. Full suite **769 passed / 5 skipped / 0 failed**.
+Hosting plan: FE→Vercel (root dir `frontend`), BE→Railway (root dir `Backend`, Mongo plugin → `MONGO_URI`
+auto-picked by `db.py`, Volume at `/app/.chroma`), DB→Railway Mongo. Deploy serves SEED data until go-live.
+Status now: ✅ deploy-ready (configs written; not built/pushed/deployed — that's Asaf's click).
+Next: replace the `vercel.json` placeholder with the real Railway URL after creating the service; set keys as
+Railway env vars (from `Backend/.env`); set `ALLOWED_ORIGINS` to the Vercel domain (or rely on the rewrite).
+Watch out for / open: **SECURITY** — the old key-leak commit was dropped from reachable history and is NOT on
+GitHub (verified); a dangling local object remains (unreachable, will gc). Rotate ANTHROPIC + FIRECRAWL keys
+to be safe. Did NOT build the Docker image locally (torch/chromadb multi-GB) — entrypoint import-verified only.

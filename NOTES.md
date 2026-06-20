@@ -1545,3 +1545,35 @@ API/pipeline — captured plan-only in `backend_connection_plan.md`.
 **Source:** PM `.venv` runs + Preview MCP + curl, this session.
 **Impact:** backend is now self-contained under `Backend/`; all three lanes (BE/FE/DB) are feature-complete;
 the only thing between here and a first live run is **keys** (exported, not just in `.env`).
+
+---
+
+## 2026-06-20 — FIRST LIVE RUN: 3 integration bugs fixed + catalog-centric design finding
+**Type:** Verified fact + Decision + Blocker
+**Entry:** Asaf provided ANTHROPIC_API_KEY + FIRECRAWL_API_KEY (stored in gitignored `Backend/.env`, scrubbed
+from `GO_LIVE_CONFIG.md`). Ran the first-ever **live** discovery (`answer_question`, no send). The system had
+NEVER run live — every test mocked the clients — so the first run surfaced **3 real integration bugs**, all
+now fixed (full offline suite stays **769 passed / 5 skipped / 0 failed**):
+1. **Loop `thinking` param** — `main.py:3158` passed `thinking={"type":"adaptive"}`, which the pinned
+   `anthropic==0.40.0` rejects ("unexpected keyword argument"). Fix: `_thinking_kwargs(client)` feature-detects
+   SDK support and degrades gracefully (Asaf-approved; CLAUDE.md §1.2 intent preserved). +1 test.
+2. **Vector A (`_vector_a_search`) None-concat** — `raw_text += block.text` crashed because the live
+   `web_search` server tool returns `server_tool_use` / `web_search_tool_result` blocks whose `.text` is None.
+   Fix: guard `isinstance(text, str)`. Vector A now returns real domains with JUST the Anthropic key (web
+   search verified live — 21 domains for one query, 93 across the run). No SerpAPI/Tavily needed for discovery.
+3. **Firecrawl `formats` 400** — `_crawl_domain` requested `formats:["markdown","html","metadata"]`; "metadata"
+   is not a valid format (returned automatically) → every scrape 400'd. Fix: `["markdown","html"]` + dict/obj-
+   robust field access. Live crawl + pixel detection now works (GTM detected on aloyoga/vuori; ICP signals
+   extracted; aloyoga 4 / vuori 3 / fabletics 3 signals → QUALIFY at ICP_TAG_THRESHOLD=3).
+**Model ids verified live:** `claude-opus-4-8` + `claude-haiku-4-5` both respond to Asaf's key (3.5 ids 404).
+**KEY FINDING — catalog-centric design / net-new discovery dead-ends:** the autonomous loop discovered 93 real
+brands but ALL mapped `in_catalog:false` against the **synthetic** `brands_catalog.csv` (12 fictional brands:
+Northwind Athletics, Cobalt Run Co, …). Per Policy 1 (only catalog-derived facts) + Policy 6, the agent
+correctly refused to qualify/persist them → fallback, `gtm_db.leads` stayed 0. The CRM is also keyed to
+catalog `Uniq_Id`s, so net-new brands can't be persisted as leads without a design change. **DECISION PENDING
+(Asaf):** (A) populate `brands_catalog.csv` with the real brand universe; (B) relax Policy 1 / prompt + mint
+CRM ids so crawl-qualified NET-NEW brands persist; (C) hybrid review-queue. This is the gate to a real
+end-to-end search→analyze→qualify→**save** run.
+**Source:** live runs in `.venv` from `Backend/` with real keys, this session.
+**Impact:** search + analyze are now proven working live; persistence of discovered leads is blocked on the
+A/B/C product decision, not on code.

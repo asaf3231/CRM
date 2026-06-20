@@ -402,11 +402,14 @@ def _vector_a_search(query: str) -> dict:
                 }
             ],
         )
-        # Extract text from response
+        # Extract text from response. Server-tool blocks (server_tool_use,
+        # web_search_tool_result) expose a `.text` attribute whose value is None,
+        # so guard on the value type — only concatenate real text blocks.
         raw_text = ""
         for block in response.content:
-            if hasattr(block, "text"):
-                raw_text += block.text
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                raw_text += text
         domains = []
         try:
             parsed = json.loads(raw_text.strip())
@@ -763,14 +766,22 @@ def _crawl_domain(domain: str, firecrawl_client, start_time: float) -> dict:
             }
 
         url = f"https://{domain}"
-        # Firecrawl scrape returns: markdown, html, metadata
+        # Firecrawl scrape returns markdown + html (+ metadata automatically).
+        # "metadata" is NOT a valid `formats` option — requesting it 400s.
         crawl_result = firecrawl_client.scrape_url(
             url,
-            params={"formats": ["markdown", "html", "metadata"]},
+            params={"formats": ["markdown", "html"]},
         )
-        html_content = crawl_result.get("html", "") or ""
-        metadata = crawl_result.get("metadata", {}) or {}
-        markdown = crawl_result.get("markdown", "") or ""
+
+        # The Firecrawl SDK may return a dict or a response object — read either.
+        def _field(obj, key, default):
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        html_content = _field(crawl_result, "html", "") or ""
+        metadata = _field(crawl_result, "metadata", {}) or {}
+        markdown = _field(crawl_result, "markdown", "") or ""
 
         pixel_flags = _detect_pixels(html_content)
 

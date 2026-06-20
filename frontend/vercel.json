@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//": "Proxies the SPA's same-origin /api calls to the Railway backend so the browser needs no CORS. After you create the Railway service, replace the destination host below with your real URL (e.g. https://reactfirst-api.up.railway.app). api.ts defaults BASE_URL to '/api', so no VITE_API_URL is needed when this rewrite is used.",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://YOUR-RAILWAY-BACKEND.up.railway.app/api/:path*"
+    }
+  ]
+}

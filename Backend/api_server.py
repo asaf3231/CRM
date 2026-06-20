@@ -19,6 +19,7 @@ Author: Asaf (ReactFirst AI)
 """
 
 import contextlib
+import os
 from typing import List
 
 from fastapi import FastAPI
@@ -57,10 +58,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — localhost dev server only (decision: NOTES.md 2026-06-19 Phase 3 entry)
+# CORS — localhost dev by default; override in prod via the ALLOWED_ORIGINS env var
+# (comma-separated), e.g. ALLOWED_ORIGINS="https://your-app.vercel.app" on Railway.
+# Reading an env var is not an import side effect (ENV4-safe). Decision: NOTES.md Phase 3.
+_allowed_origins = [
+    o.strip()
+    for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
