@@ -1577,3 +1577,45 @@ end-to-end search→analyze→qualify→**save** run.
 **Source:** live runs in `.venv` from `Backend/` with real keys, this session.
 **Impact:** search + analyze are now proven working live; persistence of discovered leads is blocked on the
 A/B/C product decision, not on code.
+
+---
+
+## 2026-06-20 — GO-LIVE (data half): real leads on the deployed site; catalog populated; C1/C2 done
+**Type:** Decision + Verified fact
+**Context:** Asaf was seeing the demo seed on `crm-asaf6.vercel.app` and wanted the live DB to show real data.
+Diagnosis: the DB connection was already live/persistent — the "mock data" was the 16-brand `api_seed` demo
+sitting in Atlas. Resolved the A/B/C catalog fork (NOTES entry above): **chose A — populate the catalog**
+(keeps Policy 1 / governance intact; no graded-contract change). Chose **live discovery** to fill the DB.
+**What landed (all PM-verified this session):**
+1. **Catalog populated** — `Backend/brands_catalog.csv` grew 12 → **30** rows (+18 real athleisure brands:
+   Alo Yoga, Vuori, Fabletics, Gymshark, Lululemon, Athleta, Outdoor Voices, Girlfriend Collective, …).
+   Test-safe: offline suite stays green (tests use fixtures / skip-if-absent; `G2` only forbids catalog
+   literals in *shipped code*, which CSV rows don't add). FK/domain integrity validated (30 rows, 1 Blacklisted).
+2. **Live discovery proved + a reliability finding** — `answer_question` ran live against Atlas and exercised
+   the whole chain (web_search → catalog match → Firecrawl crawl → pixel/ICP detection), but the **15-call LLM
+   loop qualified 0**: it inconsistently fed `evaluate_icp_tags` thin catalog-metadata strings instead of the
+   rich crawl profile, so each scored <3. A direct crawl of all 18 real brands showed **9 reliably qualify**
+   (≥3 live ICP signals). Asaf chose **persist via the real tools** over re-running the flaky loop.
+3. **`scripts/ingest_real_leads.py`** (new, dev-only) — runs the REAL pipeline tools directly
+   (`analyze_company_chunk` → ICP gate `>= ICP_TAG_THRESHOLD` → `crm_store.compute_win_prob` →
+   `crm_store.upsert_lead`) over the catalog. Genuinely live-crawled + governance-clean (Policy 1; no
+   `corporate_access_key`). **Persisted 9 real qualified athleisure leads** to Atlas (Alo 1.0, Fabletics 0.90,
+   Vuori 0.83, Girlfriend/Beyond Yoga/Rhone 0.59, P.E Nation 0.48, Ten Thousand/Year of Ours 0.40).
+4. **Demo seed retired** — deleted the 16 `seed-lead-*` rows + 1 synthetic straggler (`Lumen Skincare`, real
+   domain) from Atlas → `gtm_db.leads` = **9 real**; set `SEED_DEMO=0` on Railway (belt-and-suspenders; seed
+   is already seed-if-empty).
+5. **C1 + C2 (backend_connection_plan)** — `/api/health` now DB-aware (`{status, db:"up"|"down"|"mock"}`);
+   `/api/leads/stats` computes the funnel from `crm_store.all_leads()` via new
+   `api_adapters.compute_stats_from_leads` (was static `SEED_STATS`). +3 CONN tests (`CONN2`–`CONN4`, QA §13).
+**Verified numbers (PM):** offline full suite **777 passed / 5 skipped / 0 failed** (`MONGO_URI` unset);
+live public chain: `/api/health` → `db:"up"`; `/api/leads` → 9 real brands (no `seed-lead-*`); `/api/leads/stats`
+→ `discovered/retained=9, aboveFloor=6, strong=1, review=8` (reconciles with the 9 leads); proxy headers present.
+**No graded contract touched** (tool count 10, `answer_question`, `FALLBACK_MESSAGE`; C1/C2 are the additive
+Phase-3 API layer). Redeployed via `railway up` (heavy image, ~100s to live).
+**Still open / deferred:** (a) ICP screen still serves seed (`/api/icp` → `SEED_ICP`) — needs a new
+`icp_documents` collection (connection-plan decision #2). (b) **No UI trigger for live search/analyze** — the
+deployed backend has no live-pipeline route and **no ANTHROPIC/FIRECRAWL keys on Railway**; the `/search` +
+`/swarm` screens' data hooks return empty. Trying search/analyze from the app = the I5/C4 build (keys on
+Railway + a background discovery endpoint + FE wiring). (c) Brands outside the catalog still won't persist
+(Policy 1) — same fork, by design.
+**Source:** PM `.venv` runs + live `railway`/`curl`/`pymongo` against Atlas, this session.

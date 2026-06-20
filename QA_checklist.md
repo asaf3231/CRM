@@ -374,6 +374,21 @@ Driven by `FakeReasoningClient`.
   fires only on ASGI `lifespan`, never at import).
 - `CONN1` **Offline dev unchanged:** on the mongomock path (`MONGO_URI` unset, workspace always empty at
   boot) the 16 demo leads still seed, so the FE dev experience is identical; full offline suite stays green.
+- `CONN2` **DB-aware `/api/health` (C1):** when `MONGO_URI` is set the probe pings Mongo and reports
+  `{status, db: "up"|"down"}`; when unset it reports `db: "mock"`; a down/unreachable Mongo returns a
+  graceful `status:"degraded"` body, never a 500/hang. No client built at import (ENV4).
+- `CONN3` **Computed stats from the workspace (C2):** `GET /api/leads/stats` derives the funnel from the
+  persisted `leads` (via `api_adapters.compute_stats_from_leads`), not the static `SEED_STATS` —
+  add/modify a lead → the response changes (`discovered`/`retained`/`aboveFloor`/`strong`/`review` reflect
+  the real records).
+- `CONN4` **No leak on stats:** the `/api/leads/stats` body never carries `corporate_access_key` or
+  `contact_ids` (it emits only aggregate counts).
+
+> **Live data note (2026-06-20):** `brands_catalog.csv` was extended with a real athleisure brand universe
+> (Alo Yoga, Vuori, Fabletics, … — 18 rows alongside the 12 synthetic) so live-crawled brands match the
+> catalog and persist under Policy 1. `scripts/ingest_real_leads.py` runs the real pipeline tools
+> (analyze → ICP gate ≥3 → win-prob → upsert) to persist qualified leads. 9 real athleisure leads were
+> ingested into Atlas; the 16 demo seed rows were retired (`SEED_DEMO=0`). No graded contract changed.
 
 ---
 

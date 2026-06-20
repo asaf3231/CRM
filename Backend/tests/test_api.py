@@ -208,13 +208,17 @@ class TestINTG3HealthAndCORS:
         )
 
     def test_health_returns_correct_json(self):
-        """GET /api/health → {"status": "ok"} (exact)."""
+        """GET /api/health → {"status":"ok","db":"mock"} offline (CONN2).
+
+        With MONGO_URI unset (the test contract), the health probe reports the
+        mongomock path as db: "mock" and stays status "ok".
+        """
         from fastapi.testclient import TestClient
         import api_server
 
         client = TestClient(api_server.app)
         response = client.get("/api/health")
-        assert response.json() == {"status": "ok"}, (
+        assert response.json() == {"status": "ok", "db": "mock"}, (
             f"Unexpected body: {response.json()!r}"
         )
 
@@ -1191,3 +1195,67 @@ class TestLeadDetailEndpoint:
         assert "goal" in data and "retained" in data, (
             f"/api/leads/stats was shadowed by the dynamic id route: {data}"
         )
+
+
+class TestCONNDbTruthful:
+    """CONN2–CONN4: DB-aware /api/health + /api/leads/stats computed from the
+    real persisted workspace (connection-plan C1/C2). MONGO_URI is unset in the
+    test contract, so the DB path is mongomock and health reports db: "mock"."""
+
+    @staticmethod
+    def _lead(uniq_id, win_prob, icp_count, incidents, status, **extra):
+        rec = {
+            "uniq_id": uniq_id,
+            "domain": f"{uniq_id}.com",
+            "company": uniq_id.upper(),
+            "status": "qualified",
+            "stage": "in_crm",
+            "win_prob": win_prob,
+            "icp_count": icp_count,
+            "historical_social_incidents": incidents,
+            "current_status": status,
+            "profile": {"icp_tags": ["t"] * icp_count},
+        }
+        rec.update(extra)
+        return rec
+
+    def test_conn2_health_reports_mock_offline(self):
+        """CONN2: offline (no MONGO_URI) → {"status":"ok","db":"mock"}, never 500."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        resp = TestClient(api_server.app).get("/api/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "db": "mock"}
+
+    def test_conn3_stats_computed_from_persisted_leads(self):
+        """CONN3: /api/leads/stats reflects the actual workspace, not SEED_STATS."""
+        from fastapi.testclient import TestClient
+        import api_server
+        import crm_store
+
+        # No `with` → lifespan/seed_demo does not run; we control the workspace.
+        crm_store.upsert_lead(self._lead("x1", 0.90, 4, 2, "Unreached_Prospect"))
+        crm_store.upsert_lead(self._lead("x2", 0.30, 3, 0, "Active_Client"))
+
+        data = TestClient(api_server.app).get("/api/leads/stats").json()
+        assert data["discovered"] == 2 and data["retained"] == 2
+        assert data["aboveFloor"] == 1 and data["belowFloor"] == 1   # only x1 >= 0.5
+        assert data["strong"] == 1 and data["review"] == 1           # x1 icp4, x2 icp3
+        assert data["existingCount"] == 1 and data["newCount"] == 1  # x2 Active_Client
+        assert data["alreadyInCrm"] == 2
+
+    def test_conn4_stats_no_secret_or_pii_leak(self):
+        """CONN4: the stats body never carries corporate_access_key or contact_ids."""
+        import json
+        from fastapi.testclient import TestClient
+        import api_server
+        import crm_store
+
+        crm_store.upsert_lead(self._lead(
+            "x1", 0.9, 4, 2, "Unreached_Prospect",
+            contact_ids=["exec@x1.com"], corporate_access_key="SECRETKEY",
+        ))
+        raw = json.dumps(TestClient(api_server.app).get("/api/leads/stats").json())
+        assert "corporate_access_key" not in raw and "SECRETKEY" not in raw
+        assert "contact_ids" not in raw
