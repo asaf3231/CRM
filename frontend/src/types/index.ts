@@ -67,6 +67,10 @@ export interface IcpDocument {
   keywords: string[];
   industryVerticals: string[];
   geographicFocus: string[];
+  /** Company size band, e.g. "Mid-Market" / "Enterprise" (drives the discovery seed). */
+  sizeBand: string;
+  /** Canonical ICP tags (== backend _ICP_TAGS keys) — these drive per-lead ICP scoring. */
+  icpTags: string[];
   qualificationCriteria: { criterion: string; importance: "High" | "Medium" | "Low" }[];
   anchorCompanies: { name: string; domain: string; why: string }[];
 }
