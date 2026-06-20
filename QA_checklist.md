@@ -429,6 +429,25 @@ Driven by `FakeReasoningClient`.
 - `CONN19` **FE authoring round-trip (C10, Preview-MCP):** edit in `/icp` → Save → reload → the edit
   persists (served from the backend); `tsc --noEmit` clean.
 
+> **Phase 7 — Real Solicitation Angle (C12–C15, 2026-06-20).** The outreach value-hook (SLED Layer 4)
+> was a win-prob heuristic (`_derive_angle`) while the real `match_solicitation_angle` RAG engine
+> (Chroma+BM25+RRF, **fully local, no keys**) sat unused. Make it real — key-free; graded engine
+> (`main.py`/`rag_engine.py`/`angle_corpus.json`) byte-stable (CALLED, never modified).
+
+- `CONN20` **Real angle (C12):** `real_angle_for_record` composes a deterministic narrative from the
+  record's catalog/ICP fields and calls `match_solicitation_angle` → a real corpus `angle_key` + RRF tier
+  + rationale (NOT one of the 3 win-prob heuristic titles); deterministic; Tier 4 → honest "No strong
+  angle yet"; sparse record graceful.
+- `CONN21` **Graded engine untouched (C12):** tool count 10; `match_solicitation_angle` still the dispatch
+  entry; `crm_lead_to_detail` still emits exactly the `{title, tier, rationale}` LeadAngle shape; ENV4
+  (rag lazy).
+- `CONN22` **Angle persisted at qualify-time (C13):** a qualified catalog lead persists
+  `record["angle"]={title,tier,rationale,angle_key}`; the discovery `saved`/`qualified` output carries the
+  tier; deterministic; no `corporate_access_key` in any job body.
+- `CONN23` **Tier surfaced (C14, Preview-MCP):** `/api/leads` carries `angleTier`; the leads table shows an
+  Angle/Tier column; the lead drawer renders the real RAG angle (its source `GET /api/leads/{id}` serves the
+  matched angle, not the heuristic); `tsc --noEmit` clean.
+
 > **Live data note (2026-06-20):** `brands_catalog.csv` was extended with a real athleisure brand universe
 > (Alo Yoga, Vuori, Fabletics, … — 18 rows alongside the 12 synthetic) so live-crawled brands match the
 > catalog and persist under Policy 1. `scripts/ingest_real_leads.py` runs the real pipeline tools

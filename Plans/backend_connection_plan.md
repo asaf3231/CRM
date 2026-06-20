@@ -68,6 +68,18 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 | C8 | Deep ICP→search wiring + scoring (full-ICP seed, real `icp_fit`, `icp_score`) | `CONN15`–`CONN17` | ✅ Complete |
 | C9 | Deterministic ICP suggestions (key-free, additive) | `CONN18` | ✅ Complete |
 | C10 | FE ICP authoring UX (Save button, sizeBand/icpTags, builder cleanup) | `CONN19` | ✅ Complete |
+| C12 | Real solicitation angle — RAG engine fed a deterministic narrative (replace heuristic) | `CONN20`–`CONN21` | ✅ Complete |
+| C13 | Persist the real angle at qualify-time (pipeline + ingest + output) | `CONN22` | ✅ Complete |
+| C14 | Surface the angle tier on the leads list/table (FE) | `CONN23` | ✅ Complete |
+| C15 | Phase-7 spine + regression + commits | (meta) | ✅ Complete |
+
+> **Phase 7 — "Real Solicitation Angle" (C12–C15, 2026-06-20):** the outreach value-hook (SLED Layer 4)
+> now comes from the **real** `match_solicitation_angle` RAG engine (Chroma+BM25+RRF, local/no keys) fed a
+> deterministic narrative from each lead's catalog/ICP fields — replacing the win-prob heuristic
+> (`_derive_angle`). Persisted at qualify-time, surfaced in the drawer + leads table. Offline suite **825
+> passed / 6 skipped**; graded engine **0-diff** (`main.py`/`rag_engine.py`/`angle_corpus.json`); live API +
+> Preview verified (`seed-lead-001` → "Crisis: Pr Reputation" Tier 1, RRF 0.0318). Out of scope: live-crawl
+> narratives + LLM angle generation (the 4 vars).
 
 > **Phase 6 — "Real ICP" (C7–C10, 2026-06-20):** the ICP is now operator-authored, persistent, and
 > demonstrably drives discovery (queries + per-lead scoring) — built/proven offline, **excluding the 4

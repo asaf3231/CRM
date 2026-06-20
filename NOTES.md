@@ -1720,3 +1720,35 @@ side** (SEED_ICP + alias map), NOT by touching graded `_ICP_TAGS`; `icp_score` i
 pass/fail). **Out of scope (the 4 vars):** LLM `build_icp_document` synthesis + live discovery runs — built-ready,
 key-gated.
 **Source:** PM inline implementation + `.venv` pytest + live uvicorn/curl/Preview-MCP, this session.
+
+---
+
+## 2026-06-20 — Phase 7 "Real Solicitation Angle" (C12–C15, SLED Layer 4) — handback
+**Type:** Handback (PM, implemented inline + verified)
+**Context:** After the ICP went real (Phase 6), Asaf re-issued "make it real, not the 4 vars, full plan." Next
+target = SLED **Layer 4 (the outreach value-hook / "most important part")**. Same pattern as the ICP, one stage
+downstream: the **real** `match_solicitation_angle` RAG engine ([main.py:951]; Chroma+BM25+RRF over
+`angle_corpus.json` — **fully local, no keys**) existed, but the live pipeline computed no angle, the CRM stored
+none, and the API served a **win-prob heuristic** (`_derive_angle` → 3 canned titles). **Key insight:** the engine
+takes ANY narrative string (the code's "needs a live crawl" belief was wrong) — a narrative composed
+deterministically from the lead's catalog/ICP fields yields a real angle with no Firecrawl/keys.
+**What landed (branch `feat/icp-real-driving-search`, stacked on Phase 6; per-stage commits):**
+- **C12** (`846bdad`) `compose_angle_narrative` + `real_angle_for_record` (calls `match_solicitation_angle` lazily)
+  → real corpus `angle_key` + RRF tier + rationale; Tier 4 → "No strong angle yet"; replaced `_derive_angle` in
+  `crm_lead_to_detail` (persisted-or-computed).
+- **C13** (`fe96ba8`) `pipeline_runner.run_discovery` + `ingest_real_leads.py` persist `record["angle"]` at
+  qualify-time + surface `angleTier`/`angle` in the discovery output.
+- **C14** (`d7fb6dd`) `crm_lead_to_ui` emits `angleTier`; FE `Lead` +`angleTier` + an Angle/Tier chip column in
+  `LeadTable`; the drawer already renders the real angle (unchanged).
+- **C15** spine: QA §13 CONN20–23, connection-plan C12–C15 + Phase-7 summary, this handback, PM_LOG.
+**Verified (PM):** offline suite **825 passed / 6 skipped / 0 failed**; graded engine **0-diff** vs origin/main
+(`main.py`/`rag_engine.py`/`angle_corpus.json`); tool count 10; `match_solicitation_angle` still the dispatch
+entry. **Live (uvicorn + curl + Preview-MCP):** `GET /api/leads/seed-lead-001` → real angle **"Crisis: Pr
+Reputation" Tier 1 (angle_key `crisis_pr_reputation_002`, RRF 0.0318)** — NOT the old heuristic; the `/leads`
+table renders the Angle column (seed leads → "—" since no persisted angle); drawer wiring intact
+(`onRowClick`→`LeadDetailDrawer`, fetches the real-angle endpoint); `tsc --noEmit` clean.
+**Decisions:** the graded RAG engine is **CALLED, never modified** (no corpus expansion — that would risk the
+graded `test_rag.py` tier assertions; flagged optional/deferred); narrative is catalog/ICP-derived (Policy 1, no
+invented facts); Tier 4 → honest no-angle (Policy 6 spirit). **Out of scope (the 4 vars):** live-crawl-derived
+narratives (Firecrawl) + LLM angle generation.
+**Source:** PM inline implementation + `.venv` pytest + live uvicorn/curl/Preview-MCP, this session.
