@@ -22,7 +22,7 @@ import contextlib
 import os
 from typing import List
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -157,6 +157,30 @@ async def find_more_leads(body: FindMoreRequest) -> list:
     # Sort deterministically, then return up to target
     candidates.sort(key=lambda r: r.get("uniq_id", ""))
     return [api_adapters.crm_lead_to_ui(r) for r in candidates[: body.target]]
+
+
+@app.get("/api/leads/{lead_id}")
+async def get_lead_detail(lead_id: str) -> dict:
+    """GET /api/leads/{id} → LeadDetail (lead-detail drawer source).
+
+    Fetches the CRM record by uniq_id and maps it through crm_lead_to_detail.
+    404 if the lead does not exist.  Contacts stay EMPTY in the response — the
+    API holds no corporate_access_key, so the Policy-4 gate is not satisfied and
+    no private contact field is exposed (contact_ids are stripped too).
+
+    Declared AFTER /api/leads and /api/leads/stats (and the POST find-more) so
+    those static paths match first — Starlette matches routes in declaration
+    order, so `{lead_id}` only catches the genuinely-dynamic case.
+
+    crm_store and api_adapters are imported lazily (preserves import-safety / INTG1).
+    """
+    import crm_store        # lazy
+    import api_adapters     # lazy
+
+    record = crm_store.get_lead(lead_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="lead not found")
+    return api_adapters.crm_lead_to_detail(record)
 
 
 # ---------------------------------------------------------------------------

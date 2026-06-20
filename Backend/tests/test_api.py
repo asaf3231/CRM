@@ -1104,3 +1104,90 @@ class TestSeedDemoGuard:
         assert count == 0, (
             f"Expected 0 records with SEED_DEMO=0, got {count}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Lead detail endpoint — GET /api/leads/{id} → LeadDetail
+# ---------------------------------------------------------------------------
+
+class TestLeadDetailEndpoint:
+    """GET /api/leads/{id} → LeadDetail (lead-detail drawer source)."""
+
+    # LeadDetail = Lead keys + contacts, angle, brief
+    _DETAIL_KEYS = {
+        "id", "company", "domain", "score", "fit", "gov", "kind", "stage",
+        "tags", "winProb", "contacts", "angle", "brief",
+    }
+
+    def test_get_lead_detail_returns_200(self):
+        """GET /api/leads/<seeded id> → 200."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            response = client.get("/api/leads/seed-lead-010")
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}. Body: {response.text!r}"
+        )
+
+    def test_get_lead_detail_has_leaddetail_shape(self):
+        """The detail body carries the full LeadDetail key set + nested angle shape."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            data = client.get("/api/leads/seed-lead-010").json()
+
+        for key in self._DETAIL_KEYS:
+            assert key in data, f"Missing LeadDetail key '{key}': {data}"
+
+        # Kinetic Wear (seed-lead-010): win_prob 0.58 → score 58, Medium fit, Heavy Gov, New
+        assert data["company"] == "Kinetic Wear"
+        assert data["domain"] == "kineticwear.com"
+        assert data["score"] == 58
+
+        # contacts is a list (empty — Policy-4 gate not satisfied by the API)
+        assert isinstance(data["contacts"], list)
+        assert data["contacts"] == []
+
+        # angle shape: {title:str, tier:1..4, rationale:str}
+        angle = data["angle"]
+        assert isinstance(angle.get("title"), str) and angle["title"]
+        assert angle.get("tier") in (1, 2, 3, 4)
+        assert isinstance(angle.get("rationale"), str) and angle["rationale"]
+
+        # brief is a non-empty string
+        assert isinstance(data["brief"], str) and data["brief"]
+
+    def test_get_lead_detail_unknown_id_404(self):
+        """GET /api/leads/<unknown> → 404 (not a fabricated record)."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            response = client.get("/api/leads/does-not-exist-xyz")
+        assert response.status_code == 404, (
+            f"Expected 404 for unknown id, got {response.status_code}. Body: {response.text!r}"
+        )
+
+    def test_get_lead_detail_no_pii_leak(self):
+        """No corporate_access_key / contact_ids anywhere in the detail body (G4 / INTG5)."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            body = client.get("/api/leads/seed-lead-001").text  # record WITH contact_ids in seed
+        assert "corporate_access_key" not in body, f"PII leak: {body[:300]}"
+        assert "contact_ids" not in body, f"contact_ids leak: {body[:300]}"
+
+    def test_stats_route_still_matches_before_dynamic_id(self):
+        """Route ordering: /api/leads/stats must NOT be swallowed by /api/leads/{id}."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            data = client.get("/api/leads/stats").json()
+        # stats shape, not a LeadDetail (would 404→ or detail keys if mis-routed)
+        assert "goal" in data and "retained" in data, (
+            f"/api/leads/stats was shadowed by the dynamic id route: {data}"
+        )
