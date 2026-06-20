@@ -444,3 +444,25 @@ def get_icp_document() -> dict:
     if not doc:
         return dict(SEED_ICP)  # resilient fallback — never empty/500
     return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}
+
+
+def upsert_icp_document(fields: dict) -> dict:
+    """Merge storage-shaped `fields` onto the active ICP doc and persist (CONN13).
+
+    Merge-preserve: any storage field NOT present in `fields` keeps its existing stored
+    value, so a partial edit from the UI never drops anchors/tags it didn't send. Stamps
+    the stable `icp_id` and upserts the single active doc. The ICP has NO private contact
+    fields, so no Policy-4 gate is involved and no corporate_access_key is ever written.
+
+    Args:
+        fields: storage-shaped ICP fields to merge (a subset of the SEED_ICP keys).
+
+    Returns:
+        The saved ICP doc (SEED_ICP-shaped, without `_id`/`icp_id`).
+    """
+    current = get_icp_document()              # existing active doc, or SEED_ICP fallback
+    merged = {**current, **(fields or {})}
+    doc = dict(merged)
+    doc["icp_id"] = _ICP_DOC_ID
+    get_icp_collection().replace_one({"icp_id": _ICP_DOC_ID}, doc, upsert=True)
+    return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}

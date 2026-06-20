@@ -278,9 +278,64 @@ def icp_doc_to_ui(seed: dict) -> dict:
         "keywords": want_signals,
         "industryVerticals": [vertical],
         "geographicFocus": [geo],
+        "sizeBand": size_band,
+        "icpTags": seed.get("icp_tags", []),
         "qualificationCriteria": qualification_criteria,
         "anchorCompanies": anchor_companies,
     }
+
+
+# ---------------------------------------------------------------------------
+# ui_to_icp_doc — reverse of icp_doc_to_ui: UI IcpDocument → storage ICP fields
+# (CONN13 — ICP authoring write path)
+# ---------------------------------------------------------------------------
+
+def ui_to_icp_doc(ui: dict) -> dict:
+    """Map a (possibly partial) UI IcpDocument (camelCase) → storage-shaped ICP fields.
+
+    The inverse of icp_doc_to_ui. **Partial-safe:** emits a storage key ONLY for a UI key
+    that is present, so a partial edit merges cleanly via api_seed.upsert_icp_document.
+
+        title              → vertical
+        keywords           → want_signals
+        geographicFocus[0] → geo
+        sizeBand           → size_band
+        icpTags            → icp_tags
+        anchorCompanies    → anchor_companies
+        qualificationCriteria "Avoid: X" items → avoid_signals (prefix stripped)
+
+    The non-"Avoid:" qualificationCriteria items are a forward-only display echo of
+    want_signals (which round-trips via `keywords`), so they are ignored on the reverse.
+    `description`/`industryVerticals`/`source`/`id` are forward-derived and ignored here.
+
+    Args:
+        ui: a UI IcpDocument dict (may contain only the edited keys).
+
+    Returns:
+        dict of storage-shaped ICP fields (a subset of the SEED_ICP keys).
+    """
+    out: dict = {}
+    if "title" in ui:
+        out["vertical"] = ui["title"]
+    if "keywords" in ui:
+        out["want_signals"] = list(ui["keywords"] or [])
+    if "geographicFocus" in ui:
+        geos = ui["geographicFocus"] or []
+        out["geo"] = geos[0] if geos else ""
+    if "sizeBand" in ui:
+        out["size_band"] = ui["sizeBand"]
+    if "icpTags" in ui:
+        out["icp_tags"] = list(ui["icpTags"] or [])
+    if "anchorCompanies" in ui:
+        out["anchor_companies"] = ui["anchorCompanies"] or []
+    if "qualificationCriteria" in ui:
+        avoid = []
+        for c in ui["qualificationCriteria"] or []:
+            crit = c.get("criterion", "") if isinstance(c, dict) else ""
+            if isinstance(crit, str) and crit.startswith("Avoid: "):
+                avoid.append(crit[len("Avoid: "):])
+        out["avoid_signals"] = avoid
+    return out
 
 
 # ---------------------------------------------------------------------------

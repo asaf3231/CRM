@@ -1382,3 +1382,95 @@ class TestCONN10IcpRestartDurability:
                 api_seed.get_icp_collection().drop()
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# CONN13 / CONN14 — PUT /api/icp: ICP authoring & persistence (C7)
+# ---------------------------------------------------------------------------
+
+class TestCONN13PutIcp:
+    """CONN13: PUT /api/icp persists an edit; a follow-up GET reflects it; merge-preserve."""
+
+    def test_put_icp_returns_200_and_saved_doc(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"title": "Premium Skincare"})
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text!r}"
+        assert resp.json()["title"] == "Premium Skincare"
+
+    def test_put_icp_persists_and_get_reflects(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put("/api/icp", json={"title": "Premium Skincare", "geographicFocus": ["Europe"]})
+            got = client.get("/api/icp").json()
+        assert got["title"] == "Premium Skincare"
+        assert got["geographicFocus"] == ["Europe"]
+
+    def test_put_icp_merge_preserves_unsent_fields(self):
+        """A partial edit (only title) must NOT drop anchorCompanies / keywords."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            before = client.get("/api/icp").json()
+            client.put("/api/icp", json={"title": "Changed Vertical"})
+            after = client.get("/api/icp").json()
+        assert after["title"] == "Changed Vertical"
+        assert after["anchorCompanies"] == before["anchorCompanies"], "anchors dropped on partial edit"
+        assert after["keywords"] == before["keywords"], "keywords dropped on partial edit"
+
+    def test_put_icp_round_trips_size_and_tags(self):
+        """sizeBand + icpTags survive the UI→storage→UI round trip (forward adapter extended)."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put("/api/icp", json={"sizeBand": "Enterprise", "icpTags": ["ecommerce_dtc", "ad_spend_signals"]})
+            got = client.get("/api/icp").json()
+        assert got["sizeBand"] == "Enterprise"
+        assert got["icpTags"] == ["ecommerce_dtc", "ad_spend_signals"]
+
+    def test_put_icp_avoid_criterion_round_trips(self):
+        """qualificationCriteria 'Avoid: X' → avoid_signals → back to 'Avoid: X' on GET."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put(
+                "/api/icp",
+                json={"qualificationCriteria": [{"criterion": "Avoid: B2B focus", "importance": "Low"}]},
+            )
+            got = client.get("/api/icp").json()
+        crits = [c["criterion"] for c in got["qualificationCriteria"]]
+        assert "Avoid: B2B focus" in crits
+
+
+class TestCONN14PutIcpValidation:
+    """CONN14: malformed body → 4xx (never 500); no secret leak; ENV4 / import-safe."""
+
+    def test_put_icp_malformed_body_is_4xx_not_500(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"keywords": "should-be-a-list-not-a-string"})
+        assert 400 <= resp.status_code < 500, f"Expected 4xx, got {resp.status_code}: {resp.text!r}"
+
+    def test_put_icp_no_corporate_access_key_in_response(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"title": "X"})
+        assert "corporate_access_key" not in json.dumps(resp.json())
+
+    def test_upsert_icp_document_exists_and_collection_stays_lazy(self):
+        """api_seed.upsert_icp_document exists; merely importing/referencing builds no client (ENV4)."""
+        import api_seed
+        api_seed._icp_collection = None
+        assert hasattr(api_seed, "upsert_icp_document")
+        assert api_seed._icp_collection is None  # not built by import / attribute access
