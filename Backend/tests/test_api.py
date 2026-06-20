@@ -1483,3 +1483,80 @@ class TestCONN14PutIcpValidation:
         api_seed._icp_collection = None
         assert hasattr(api_seed, "upsert_icp_document")
         assert api_seed._icp_collection is None  # not built by import / attribute access
+
+
+# ---------------------------------------------------------------------------
+# CONN20 / CONN21 — real solicitation angle (C12): RAG engine, not heuristic
+# ---------------------------------------------------------------------------
+
+_HEURISTIC_TITLES = {
+    "Crisis-narrative brand-safety angle", "Reputation-watch angle", "Growth-performance angle",
+}
+
+
+class TestCONN20RealAngle:
+    """CONN20: real_angle_for_record uses the RAG engine (real corpus angle_key), not the win-prob heuristic."""
+
+    def test_crisis_record_gets_real_corpus_angle(self):
+        import api_adapters
+
+        record = {
+            "company": "Northwind Athletics", "domain": "northwind.com",
+            "profile": {"category_path": "Apparel > Athleisure > Sustainable",
+                        "icp_tags": ["ecommerce_dtc", "paid_social_advertising"]},
+            "historical_social_incidents": 6, "icp_count": 4, "win_prob": 0.8,
+        }
+        angle = api_adapters.real_angle_for_record(record)
+        assert angle["tier"] in (1, 2, 3, 4)
+        assert "angle_key" in angle
+        assert angle["title"] not in _HEURISTIC_TITLES, "still returning the old win-prob heuristic title"
+
+    def test_real_angle_is_deterministic(self):
+        import api_adapters
+
+        record = {"company": "X", "profile": {"category_path": "Apparel > Athleisure"},
+                  "historical_social_incidents": 5, "icp_count": 3, "win_prob": 0.7}
+        assert api_adapters.real_angle_for_record(record) == api_adapters.real_angle_for_record(record)
+
+    def test_compose_narrative_includes_real_fields(self):
+        import api_adapters
+
+        narrative, cat = api_adapters.compose_angle_narrative({
+            "company": "AcmeCo",
+            "profile": {"category_path": "Apparel > Athleisure", "icp_tags": ["ecommerce_dtc"]},
+            "historical_social_incidents": 7, "icp_count": 3,
+        })
+        assert "AcmeCo" in narrative and "Apparel > Athleisure" in narrative and "7" in narrative
+        assert cat == "Apparel > Athleisure"
+
+    def test_sparse_record_is_graceful(self):
+        import api_adapters
+
+        angle = api_adapters.real_angle_for_record({"company": "Z"})
+        assert angle["tier"] in (1, 2, 3, 4)
+        assert isinstance(angle["title"], str) and angle["title"]
+        assert isinstance(angle["rationale"], str) and angle["rationale"]
+
+
+class TestCONN21GradedEngineUntouched:
+    """CONN21: C12 only CALLS the angle engine — graded tool surface byte-stable."""
+
+    def test_tool_count_still_10(self):
+        import main
+        assert len(main.TOOL_SCHEMAS) == 10 and len(main.TOOL_DISPATCH) == 10
+
+    def test_match_solicitation_angle_still_dispatch_entry(self):
+        import main
+        assert main.TOOL_DISPATCH.get("match_solicitation_angle") is main.match_solicitation_angle
+
+    def test_lead_detail_angle_shape_preserved(self):
+        """crm_lead_to_detail still emits EXACTLY the LeadAngle shape {title, tier, rationale}."""
+        import api_adapters
+
+        detail = api_adapters.crm_lead_to_detail({
+            "company": "X", "domain": "x.com", "uniq_id": "u1",
+            "profile": {"category_path": "Apparel > Athleisure"},
+            "historical_social_incidents": 5, "icp_count": 3, "win_prob": 0.6,
+        })
+        assert set(detail["angle"].keys()) == {"title", "tier", "rationale"}
+        assert detail["angle"]["tier"] in (1, 2, 3, 4)

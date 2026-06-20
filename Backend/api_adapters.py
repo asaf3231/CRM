@@ -159,44 +159,87 @@ def crm_lead_to_ui(record: dict) -> dict:
 # crm_lead_to_detail — CRM record → LeadDetail (camelCase) (lead-detail drawer)
 # ---------------------------------------------------------------------------
 
-# win_prob → angle Tier bands (deterministic; mirrors the 1..4 scale the FE
-# TierBadge renders). This is a DERIVED view of the record's own win_prob, NOT a
-# live match_solicitation_angle RAG result (which needs a crawl). Highest band wins.
-_ANGLE_TIER_BANDS = ((0.75, 1), (0.50, 2), (0.25, 3))
+# ---------------------------------------------------------------------------
+# Real solicitation angle (C12) — call the graded match_solicitation_angle RAG
+# engine (Chroma + BM25 + RRF over angle_corpus.json — fully LOCAL, no API keys),
+# fed a DETERMINISTIC narrative composed from the record's own catalog/ICP fields.
+# The engine takes any narrative string (the old "needs a live crawl" belief was
+# wrong); main/rag_engine are imported lazily and CALLED, never modified.
+# ---------------------------------------------------------------------------
+
+# Honest Tier-4 (No Match) angle — never fabricate a hook (Policy 6 spirit).
+_NO_ANGLE = {
+    "title": "No strong angle yet",
+    "tier": 4,
+    "rationale": "No crisis-case-study angle scored above the match threshold for this brand's profile.",
+    "angle_key": "no_match",
+}
 
 
-def _derive_angle(win_prob: float, gov: str, tags: list, incidents: int, icp_count: int) -> dict:
-    """Derive a deterministic LeadAngle from the record's REAL signals.
+def compose_angle_narrative(record: dict) -> tuple:
+    """Build a deterministic (narrative, category_path) for match_solicitation_angle from the record's
+    OWN catalog/ICP fields — no live crawl, no keys (Policy 1: no invented facts)."""
+    profile = record.get("profile", {}) if isinstance(record.get("profile"), dict) else {}
+    company = record.get("company", "") or record.get("domain", "") or "This brand"
+    category_path = str(profile.get("category_path", "") or "")
+    incidents = record.get("historical_social_incidents", 0)
+    icp_count = record.get("icp_count", 0)
+    tags = profile.get("icp_tags", []) if isinstance(profile, dict) else []
+    tag_str = ", ".join(str(t).replace("_", " ") for t in tags) if tags else ""
+    win_prob = record.get("win_prob", 0.0)
 
-    Honest derivation — no invented external facts:
-      - tier is banded from the record's own win_prob,
-      - title is categorised from its GovBand (same spirit as gov_band/fit_grade),
-      - rationale quotes the actual ICP-tag / incident / win-prob numbers.
-    The true RAG-matched angle requires a live crawl + match_solicitation_angle run.
+    parts = [f"{company} is a {category_path} brand" if category_path else f"{company} is a DTC brand"]
+    if incidents:
+        parts.append(
+            f"with {incidents} historical social-media / PR incident(s) and brand-safety / reputation crisis exposure"
+        )
+    parts.append(f"{icp_count} ICP signal(s) matched" + (f" ({tag_str})" if tag_str else ""))
+    if win_prob:
+        parts.append(f"win probability {round(win_prob * 100)}%")
+    return "; ".join(parts) + ".", category_path
 
-    Returns a LeadAngle dict: {title, tier (1..4), rationale}.
-    """
-    tier = 4
-    for floor, t in _ANGLE_TIER_BANDS:
-        if win_prob >= floor:
-            tier = t
-            break
 
-    if gov == "Heavy Gov":
-        title = "Crisis-narrative brand-safety angle"
-    elif gov == "Light Gov":
-        title = "Reputation-watch angle"
-    else:
-        title = "Growth-performance angle"
+def _angle_title(angle_key: str) -> str:
+    """Human title from a corpus angle_key, e.g. 'crisis_social_media_001' → 'Crisis: Social Media'."""
+    if not angle_key or angle_key == "no_match":
+        return "No strong angle yet"
+    base = str(angle_key).rstrip("0123456789").rstrip("_")  # drop a trailing _001
+    words = base.replace("_", " ").split()
+    if words and words[0].lower() == "crisis":
+        return "Crisis: " + " ".join(w.capitalize() for w in words[1:])
+    return " ".join(w.capitalize() for w in words)
 
-    tag_str = ", ".join(tags) if tags else "no ICP tags"
-    rationale = (
-        f"Derived from CRM signals — {icp_count} ICP tag(s) matched ({tag_str}); "
-        f"{incidents} historical social incident(s) ({gov}); "
-        f"win probability {round(win_prob * 100)}%. "
-        f"The RAG-matched angle is computed on a live crawl (match_solicitation_angle)."
-    )
-    return {"title": title, "tier": tier, "rationale": rationale}
+
+def real_angle_for_record(record: dict) -> dict:
+    """The REAL RAG-matched solicitation angle for a lead — calls main.match_solicitation_angle
+    (Chroma+BM25+RRF, local, no keys) on a deterministic narrative. Replaces the win-prob heuristic.
+    Tier 4 (No Match) → honest 'No strong angle yet'. Returns {title, tier (1..4), rationale, angle_key}.
+    main/rag imported lazily (ENV4); the graded tool is CALLED, never modified."""
+    narrative, category_path = compose_angle_narrative(record)
+    try:
+        import main  # lazy — rag_engine builds Chroma on first use, not at import
+        result = main.match_solicitation_angle(narrative, category_path)
+    except Exception:  # noqa: BLE001 — never crash the adapter
+        return dict(_NO_ANGLE)
+
+    angle_key = result.get("angle_key", "no_match")
+    tier = result.get("tier", 4)
+    if tier >= 4 or angle_key == "no_match":
+        return dict(_NO_ANGLE)
+
+    rrf = (result.get("scores") or {}).get("top_rrf_score", 0.0)
+    incidents = record.get("historical_social_incidents", 0)
+    icp_count = record.get("icp_count", 0)
+    return {
+        "title": _angle_title(angle_key),
+        "tier": tier,
+        "rationale": (
+            f"RAG-matched to crisis case study '{angle_key}' (Tier {tier}, RRF {round(rrf, 4)}) on this "
+            f"brand's profile — {category_path or 'DTC'}, {incidents} historical incident(s), "
+            f"{icp_count} ICP signal(s)."
+        ),
+        "angle_key": angle_key,
+    }
 
 
 def crm_lead_to_detail(record: dict) -> dict:
@@ -224,7 +267,10 @@ def crm_lead_to_detail(record: dict) -> dict:
     incidents = record.get("historical_social_incidents", 0)
 
     base["contacts"] = []  # Policy-4 gate not satisfied by the API → no private contacts revealed
-    base["angle"] = _derive_angle(win_prob, base["gov"], base["tags"], incidents, icp_count)
+    # Real RAG-matched angle: use the value persisted at qualify-time (C13) when present, else compute now.
+    persisted = record.get("angle") if isinstance(record.get("angle"), dict) else None
+    a = persisted if (persisted and persisted.get("tier")) else real_angle_for_record(record)
+    base["angle"] = {"title": a.get("title", ""), "tier": a.get("tier", 4), "rationale": a.get("rationale", "")}
     base["brief"] = (
         f"{base['company']} ({base['domain']}) is a {base['kind']} lead at the "
         f"'{base['stage']}' stage. {base['fit']} ICP fit "
