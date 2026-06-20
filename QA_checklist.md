@@ -404,6 +404,31 @@ Driven by `FakeReasoningClient`.
   on a missing/invalid `DISCOVERY_TOKEN`, 409 while a run holds the single-job lock; 404 on an unknown job id;
   no `corporate_access_key` in any job body. Import-safety preserved (`pipeline_runner` lazy; ENV4).
 
+> **Phase 6 — Real ICP: authoring + ICP-driven discovery (C7–C10, 2026-06-20).** Make the ICP an
+> operator-authored, persistent document that demonstrably drives the search/scoring — everything
+> EXCEPT the 4 live vars (`ANTHROPIC_API_KEY`/`FIRECRAWL_API_KEY`/`ENABLE_LIVE`/`DISCOVERY_TOKEN`).
+> All offline/deterministic; the graded gate stays byte-stable.
+
+- `CONN13` **ICP write/persist (C7):** `PUT /api/icp` maps the UI IcpDocument → storage shape
+  (`api_adapters.ui_to_icp_doc`) and merge-persists via `api_seed.upsert_icp_document` (unsent fields
+  preserved); a follow-up `GET /api/icp` reflects the edit; `sizeBand`/`icpTags` + `"Avoid: "` criteria
+  round-trip. Survives a restart (live `skipif`-gated).
+- `CONN14` **ICP write validation (C7):** a malformed body → structured 4xx (never 500); no
+  `corporate_access_key` in the response; `api_seed._icp_collection` stays lazy (ENV4).
+- `CONN15` **ICP drives queries (C8):** `pipeline_runner.compose_icp_query_terms` folds the FULL ICP
+  (vertical + want_signals + icp_tags + size_band + geo) into the discovery seed; changing any field
+  changes the seed; empty ICP → safe fallback.
+- `CONN16` **ICP drives scoring (C8):** `canonicalize_icp_tags` aligns ICP tags → canonical `_ICP_TAGS`
+  keys so `icp_fit` overlaps the live crawl signals (was always 0); `icp_score` rewards overlap, penalizes
+  avoid matches, bounded [0,1]; `run_discovery` ranks `qualified`/`saved` by it.
+- `CONN17` **Graded gate untouched (C8):** `_ICP_TAGS`/`evaluate_icp_tags`/`ICP_TAG_THRESHOLD` byte-stable
+  (`main.py` 0-diff vs HEAD); every alias target ⊆ `_ICP_TAGS.keys()`; tool count 10; the ≥3 gate still
+  passes ≥3 / fails <3.
+- `CONN18` **Deterministic suggestions (C9):** `GET /api/icp/suggestions` returns additive, key-free
+  phrases NOT already in the active ICP (no LLM); deterministic; reflects the persisted doc.
+- `CONN19` **FE authoring round-trip (C10, Preview-MCP):** edit in `/icp` → Save → reload → the edit
+  persists (served from the backend); `tsc --noEmit` clean.
+
 > **Live data note (2026-06-20):** `brands_catalog.csv` was extended with a real athleisure brand universe
 > (Alo Yoga, Vuori, Fabletics, … — 18 rows alongside the 12 synthetic) so live-crawled brands match the
 > catalog and persist under Policy 1. `scripts/ingest_real_leads.py` runs the real pipeline tools

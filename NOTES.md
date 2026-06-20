@@ -1688,3 +1688,35 @@ next step (deferred pending Asaf's go-ahead; FE lane).
 (new), `Backend/tests/conftest.py` (`_jobs_collection` reset); spine: `backend_connection_plan.md` (C4),
 `QA_checklist.md` §13 (CONN7/11/12).
 **Source:** PM `.venv` runs + live Railway deploy (route confirmed live: `POST` → 403) this session.
+
+---
+
+## 2026-06-20 — Phase 6 "Real ICP" (C7–C10): authoring + ICP-driven discovery — handback
+**Type:** Handback (PM, implemented inline + verified)
+**Context:** Asaf asked "is the ICP real / does it affect anything?" Audit found it was a real DB object with
+**frozen, placeholder contents and ~zero effect**: read-only (no write path / no FE Save), the seed used only
+vertical+want_signals, and `icp_fit` overlapped two **disjoint** vocabularies (`SEED_ICP.icp_tags` "dtc_brand"…
+vs the crawler's `_ICP_TAGS` keys) → always 0. Asaf: do everything to make it real + drive the search, **except
+the 4 live vars** (`ANTHROPIC`/`FIRECRAWL`/`ENABLE_LIVE`/`DISCOVERY_TOKEN`) — full-stack, deep. SLED reference
+(`GTM_Engine_KB_SLED_AI.md` §L1–2): *ICP = structured constraints + a keyword set; the keywords bridge to search.*
+**What landed (branch `feat/icp-real-driving-search`; per-stage commits):**
+- **C7** `PUT /api/icp` write path — `api_seed.upsert_icp_document` (merge-preserve), `api_adapters.ui_to_icp_doc`
+  (reverse) + `icp_doc_to_ui` now emits `sizeBand`/`icpTags` (lossless round-trip). `CONN13`/`CONN14`. (`5e7ca3f`)
+- **C8** ICP actually drives discovery — `compose_icp_query_terms` folds the FULL ICP into the seed;
+  `canonicalize_icp_tags` + `_ICP_TAG_ALIASES` realign ICP tags → canonical `_ICP_TAGS` keys so `icp_fit` is real;
+  `SEED_ICP.icp_tags` → canonical; `icp_score` per-lead ranking. **`main.py` 0-diff** (graded gate byte-stable,
+  ICPB5/Policy 2). `CONN15`–`CONN17`. (`54ec418`)
+- **C9** `/api/icp/suggestions` now deterministic + additive (key-free pool, excludes present tags) instead of
+  echoing want_signals. `CONN18`. (`27f118b`)
+- **C10** FE ICP Builder **Save** button (was absent — edits died on reload) + `sizeBand`/`icpTags` editors +
+  removed hardcoded SLED-tender fields; `api.ts` `putJSON`/`saveIcpDocument`; `IcpDocument` +`sizeBand`/`icpTags`.
+  `CONN19`. (`40acb39`)
+**Verified (PM):** offline suite **816 passed / 6 skipped / 0 failed** (`MONGO_URI` unset). `main.py` 0-diff vs HEAD;
+threshold 3, tools 10/10. **Live (uvicorn + Preview-MCP):** PUT edit persists + merge-preserves keywords; `icpTags`
+serves the canonical vocab; suggestions additive; **UI edit → Save → reload → "UI Edited ICP" persists** (the
+headline — edits no longer die on reload). `tsc --noEmit` clean.
+**Decisions:** single active ICP (edit-in-place, `icp_id="active"`); the vocabulary fix is done on the **ICP-data
+side** (SEED_ICP + alias map), NOT by touching graded `_ICP_TAGS`; `icp_score` is ranking-only (the ≥3 gate stays
+pass/fail). **Out of scope (the 4 vars):** LLM `build_icp_document` synthesis + live discovery runs — built-ready,
+key-gated.
+**Source:** PM inline implementation + `.venv` pytest + live uvicorn/curl/Preview-MCP, this session.

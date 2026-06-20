@@ -51,7 +51,7 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 ---
 
 ## Status legend
-⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0–C2 + C6 executed (Asaf, 2026-06-20); C3–C5 plan-only.**
+⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0–C2 + C6–C10 executed (Asaf, 2026-06-20); C3–C5 plan-only.**
 
 ## Stage tracker (proposed)
 
@@ -64,6 +64,17 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 | C4 | Live-pipeline ingest (`ENABLE_LIVE`, OQ-7-gated) — merges I5 | `CONN7`, `CONN11`–`CONN12` | 🔄 Code complete (offline-green); live pending keys |
 | C5 | FE wiring + cross-restart Preview proof | `CONN8` | ⬜ Proposed |
 | C6 | ICP durable substrate (read-only persistence) — decision #2, read half | `CONN9`–`CONN10` | ✅ Complete |
+| C7 | ICP authoring & persistence (`PUT /api/icp` write path) | `CONN13`–`CONN14` | ✅ Complete |
+| C8 | Deep ICP→search wiring + scoring (full-ICP seed, real `icp_fit`, `icp_score`) | `CONN15`–`CONN17` | ✅ Complete |
+| C9 | Deterministic ICP suggestions (key-free, additive) | `CONN18` | ✅ Complete |
+| C10 | FE ICP authoring UX (Save button, sizeBand/icpTags, builder cleanup) | `CONN19` | ✅ Complete |
+
+> **Phase 6 — "Real ICP" (C7–C10, 2026-06-20):** the ICP is now operator-authored, persistent, and
+> demonstrably drives discovery (queries + per-lead scoring) — built/proven offline, **excluding the 4
+> live vars** (LLM ICP synthesis + live runs stay key-gated). Offline suite **816 passed / 6 skipped**;
+> live PUT round-trip + Preview-MCP edit→Save→reload verified; graded contract byte-stable (`main.py`
+> 0-diff, tool count 10). Remaining: C3 (other write endpoints), C5 (cross-restart FE proof), C4 live
+> enablement.
 
 ---
 
