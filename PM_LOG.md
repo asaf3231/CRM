@@ -471,3 +471,201 @@ Railway env vars (from `Backend/.env`); set `ALLOWED_ORIGINS` to the Vercel doma
 Watch out for / open: **SECURITY** — the old key-leak commit was dropped from reachable history and is NOT on
 GitHub (verified); a dangling local object remains (unreachable, will gc). Rotate ANTHROPIC + FIRECRAWL keys
 to be safe. Did NOT build the Docker image locally (torch/chromadb multi-GB) — entrypoint import-verified only.
+
+## 2026-06-20 14:10 — [BACKEND] DEPLOY PENDING (Railway plugin not loaded this session)
+The Railway + Mongodb plugins are installed/enabled in Customize, but their MCP tools + the `/use-railway`
+skill are NOT available in this session (verified: skill "Unknown", ToolSearch finds no Railway/Mongo tools)
+— they register only after a Claude Code restart. **Everything is committed + pushed to `origin/main`**
+(Backend/Dockerfile, .dockerignore, railway.json, frontend/vercel.json, env-driven CORS). Keys in Backend/.env.
+NEXT SESSION (after restart, with Railway tools live): drive the deploy — Railway service from repo
+asaf3231/CRM, branch main, **Root Directory = Backend** (Dockerfile), add MongoDB plugin → set `MONGO_URI`,
+generate a public domain; then put that URL in `frontend/vercel.json` and deploy the frontend to Vercel
+(Root Directory = frontend). Deploy serves SEED data (no keys needed to boot).
+
+## 2026-06-20 14:45 — [BACKEND] DEPLOYED to Railway (backend live; Mongo deferred; FE pending)
+Drove the Railway deploy via the CLI (installed `@railway/cli` 5.20; user did the OAuth device sign-in).
+Project "Backend" (id 05ffb99d-8b25-4670-a0e9-53cc35c0f9e9), service 694b8374. **Backend is LIVE +
+verified:** https://backend-production-77e4.up.railway.app — /api/health ok, /api/leads → 16 seed leads,
+/api/outreach/stats correct. **Bug found+fixed:** first deploy crash-looped — Railway ran railway.json's
+`startCommand` without a shell so `$PORT` was literal (`Invalid value for '--port': '$PORT'`). Fix: removed
+`startCommand` from railway.json → Dockerfile CMD (`sh -c … ${PORT:-8000}`) handles it. Committed+pushed to
+main (1f2845c). `frontend/vercel.json` rewrite now points at the Railway URL (pushed).
+**Mongo NOT added:** `railway add -d mongo` returned "Unauthorized" ×3 while every other Railway command
+works — almost certainly a Railway account/plan limit on DB provisioning (new account). Demo runs fine on
+the in-memory mongomock fallback (no MONGO_URI). To enable persistence: add MongoDB in the Railway dashboard
+once the account allows DBs, then set the backend's `MONGO_URI` to it (db.py auto-uses it).
+Next: deploy the frontend to Vercel (import repo, Root Directory = frontend, branch main — vercel.json
+proxies /api → Railway). Then verify the UI loads through the proxy.
+
+## 2026-06-20 14:55 — [FRONTEND] DEPLOYED to Vercel — FULL STACK LIVE + CONNECTED ✅
+Vercel project "crm" (git-integration on `main`, Root Directory=`frontend`, framework Vite). Drove it via
+git push (the connector's deploy_to_vercel only emits guidance; Vercel CLI not installed). **Two build bugs
+found+fixed:** (1) first prod build was Framework "Other" because Root Directory wasn't set → user set it to
+`frontend`; (2) build then ERRORED instantly because `vercel.json` had a `"//"` comment key (Vercel rejects
+unknown top-level props) → removed it (commit b3181a3). Redeploy **READY**.
+**LIVE URLs:** FE https://crm-asaf6.vercel.app (Vite app, 200) · BE https://backend-production-77e4.up.railway.app.
+**Verified end-to-end via the Vercel connector:** `/` serves the ReactFirst SPA; `GET /api/leads` → 200 with
+the 16 seed leads and `x-railway-edge`/`x-railway-request-id` headers = the vercel.json rewrite proxies
+Vercel→Railway correctly.
+Open items: (1) **Vercel Deployment Protection is ON** — the URL needs Vercel login; turn off Settings →
+Deployment Protection → Vercel Authentication for a public URL. (2) Mongo deferred (Railway DB provisioning
+"Unauthorized" — account/plan limit); demo runs on mongomock. (3) Serves SEED data — real go-live needs the
+GO_LIVE_CONFIG keys/providers.
+
+## 2026-06-20 15:25 — [BACKEND] PERSISTENCE LIVE on MongoDB Atlas — full stack connected ✅
+Switched the DB from Railway (blocked) to **MongoDB Atlas free tier** (user's plugin). Added `dnspython==2.8.0`
+to requirements (pymongo needs it for `mongodb+srv://`), set `MONGO_URI` + `DB_NAME=gtm_db` on the Railway
+backend (secret in env only, never tracked). **Bug chain debugged from logs:** the Atlas build kept crashing
+at startup with `SSL handshake failed … TLSV1_ALERT_INTERNAL_ERROR` — that's Atlas rejecting a non-allowlisted
+IP, i.e. Railway's egress wasn't in the Atlas **Network Access** list (only the user's own IP was). Reverted
+MONGO_URI to restore the demo while the user added **`0.0.0.0/0`** to the Atlas IP Access List, then re-applied
+MONGO_URI. **Verified:** backend healthy; Atlas `gtm_db.leads` = **16 docs**; the public chain
+`crm-asaf6.vercel.app/api/leads` → Vercel rewrite → Railway → Atlas returns the 16 leads (x-railway-edge header).
+**STACK: FE Vercel (crm-asaf6.vercel.app) ↔ BE Railway (backend-production-77e4.up.railway.app) ↔ Atlas — all live + persistent.**
+Open: (1) Vercel Deployment Protection still ON (URL needs login; turn off for public). (2) Still SEED data —
+real discovery/report/send = GO_LIVE_CONFIG work. (3) Rotate the ANTHROPIC/FIRECRAWL keys when convenient.
+
+## 2026-06-20 15:29 — [BACKEND] SESSION START (fresh PM; post-deploy, awaiting Asaf's open-item pick)
+Picking up: backend project is **feature-complete + DEPLOYED + CONNECTED + PERSISTENT on SEED data.** Read
+the full spine (PM_Methodology → PM_LOG → CLAUDE → PLAN → QA → NOTES → ORCHESTRATION). No stage is mid-flight.
+State as read (to re-verify before trusting): Stages 0–14 ✅, Phase 3 I0–I4 ✅, Phase 4 D0–D4 ✅, Phase 5 C0 ✅.
+Offline suite baseline **769 passed / 5 skipped (S10 + 4 live-gated) / 0 failed** from cwd `Backend/`, MONGO_URI
+unset (mongomock). Live stack: FE Vercel `crm-asaf6.vercel.app` ↔ BE Railway `backend-production-77e4.up.railway.app`
+↔ Atlas `gtm_db.leads`=16 (persistent). **Key live-run finding (NOTES 2026-06-20):** a first real
+`answer_question` discovery ran on Asaf's ANTHROPIC+FIRECRAWL keys; 3 integration bugs fixed (thinking-param
+feature-detect, Vector-A None-concat guard, Firecrawl formats 400); web search + crawl/pixel detection proven
+live; BUT all 93 discovered brands mapped `in_catalog:false` vs the **synthetic** 12-brand catalog → Policy 1/6
+correctly refused to persist → `gtm_db.leads` stayed 0. **DECISION PENDING (Asaf):** A) populate real catalog /
+B) relax Policy 1 + mint CRM ids for net-new / C) hybrid review-queue — this is the gate to a real
+search→analyze→qualify→**save** run, and it blocks "go-live" (open item #3).
+Plan for this session: NOT advancing any stage unprompted. Surface the open-items menu to Asaf (deploy-protection
+off / key rotation / Phase-5 go-live / screen overlap) and let him pick. Will re-verify the 769/5 baseline + any
+numbers before acting on whatever he chooses. Stay in lane (no `frontend/`). Write a SESSION END before stopping.
+
+## 2026-06-20 15:37 — [BACKEND] SESSION START (fresh PM; resuming post-deploy)
+Note: the prior block above (15:29 START) has **no matching SESSION END** → it was interrupted before doing
+work (gap acknowledged, append-only honesty). I'm raising fresh and continuing from the same point.
+Picking up: backend is **feature-complete + DEPLOYED + CONNECTED + PERSISTENT on SEED data.** No stage is
+mid-flight. Read the full spine in order (PM_Methodology → PM_LOG → CLAUDE → PLAN → QA → NOTES → ORCHESTRATION).
+State as read (to re-verify before trusting any number): Stages 0–14 ✅; Phase 3 I0–I4 ✅ (I5 deferred);
+Phase 4 D0–D4 ✅; Phase 5 C0 ✅. Offline suite baseline **769 passed / 5 skipped (S10 + 4 live-gated) / 0
+failed** from cwd `Backend/`, `MONGO_URI` unset (mongomock). Live stack: FE Vercel `crm-asaf6.vercel.app` ↔
+BE Railway `backend-production-77e4.up.railway.app` ↔ Atlas `gtm_db.leads`=16 (persistent). **Catalog-centric
+blocker (NOTES 2026-06-20 "FIRST LIVE RUN"):** the live loop discovered 93 real brands but all mapped
+`in_catalog:false` vs the synthetic 12-brand catalog → Policy 1/6 correctly refused to persist → DECISION
+PENDING (Asaf): (A) real catalog / (B) relax Policy 1 + mint CRM ids for net-new / (C) hybrid review-queue.
+This gates a real search→analyze→qualify→**save** run and "go-live."
+Plan for this session: NOT advancing any stage unprompted. Surface the open-items menu to Asaf and let him
+pick; re-verify the 769/5 baseline + any numbers before acting on his choice. Stay in lane (no `frontend/`).
+Write a SESSION END before stopping.
+
+## 2026-06-20 15:49 — [BACKEND] SESSION END / HANDOFF (cross-lane: fixed Vercel SPA 404)
+Did: Asaf reported the deployed app 404ing on `crm-theta-ruby-97.vercel.app/leads`. Diagnosed (read-only):
+the React app uses `BrowserRouter` (client-side routing) but `frontend/vercel.json` had only the
+`/api/:path*`→Railway rewrite — no SPA catch-all — so a direct load/refresh of any deep route (`/leads`,
+`/icp`, `/center`…) hit Vercel's 404 (root `/` + in-app nav worked; only hard loads broke). Confirmed live
+pre-fix: `/`→200, `/api/health`→200, `/leads`→**404**. Fix = added `{"source":"/(.*)","destination":
+"/index.html"}` AFTER the `/api` rewrite (Vercel applies rewrites post-filesystem, so real assets + `/api/*`
+unaffected). **Process:** direct push to `main` was correctly auto-denied (bypasses PR review); `gh`/token
+absent, so routed via branch `fix/spa-fallback-vercel` → Asaf opened+merged **PR #1** → `main`=`6c697b2`.
+Verified: Vercel preview (commit 3f39617) `/leads`+`/icp`→200; then PRODUCTION rebuild `dpl_3yTGjLe2…` READY
+→ both aliases (`crm-theta-ruby-97` + `crm-asaf6`) now serve `/`,`/leads`,`/icp`,`/center`,`/api/health` all
+**200**. (This was a frontend/deploy-config fix done at Asaf's direct request — out of the usual BE lane;
+no Python/graded code touched, so the 769/5 offline suite is unaffected and was NOT re-run.)
+Status now: ✅ Vercel SPA routing fixed + live-verified. Backend stages all ✅ (unchanged).
+Next PM should: nothing queued from this fix. The pre-existing open items still stand and await Asaf's pick:
+(1) **catalog-centric save blocker** — decision A/B/C (real catalog / relax Policy 1 + mint CRM ids / hybrid
+review-queue) is the gate to a real search→analyze→qualify→**save** run; (2) Vercel **Deployment Protection**
+(public-URL access); (3) rotate ANTHROPIC+FIRECRAWL keys (old leak's dangling local object).
+Watch out for / open: (1) `PM_LOG.md` + (now) nothing else uncommitted on the working branch
+`fix/spa-fallback-vercel` — the vercel.json fix is merged to main; the local branch is 1 behind the merge
+commit. (2) `curl` needs an absolute path (`/usr/bin/curl`) inside loop subshells in this shell. (3) No `gh`
+CLI / GitHub token in this env — PRs must be opened/merged by Asaf or via the GitHub URL.
+
+## 2026-06-20 16:16 — [BACKEND] SESSION END / HANDOFF (GO-LIVE data half: real leads on the deployed site)
+Note: this continues my own 15:29 START. A *concurrent* PM block (15:37 START / 15:49 END above) ran a
+separate cross-lane Vercel SPA-404 fix in parallel — append-only honesty; my work below is independent of it.
+Did: Asaf picked "make the DB go live with real data, not the seed." Diagnosed that the connection was already
+live — the "mock data" was the 16-brand `api_seed` demo sitting in Atlas. Resolved the A/B/C catalog fork →
+**A (populate catalog)** + **live discovery**, executed end to end:
+- **Catalog** `Backend/brands_catalog.csv` 12 → **30** rows (+18 real athleisure brands). Offline suite stayed
+  green after the edit (**769**) — tests use fixtures, so a real catalog is test-safe.
+- **Live discovery** proved the whole chain live (web_search → catalog match → Firecrawl → pixel/ICP), but the
+  15-call LLM loop qualified 0 (fed `evaluate_icp_tags` thin strings). A direct crawl showed 9/18 brands
+  reliably qualify; Asaf chose **persist via the real tools**. New `scripts/ingest_real_leads.py` (analyze →
+  ICP≥3 → win-prob → upsert) persisted **9 real qualified athleisure leads** to Atlas.
+- **Retired the demo seed**: deleted 16 `seed-lead-*` + 1 synthetic straggler → `gtm_db.leads` = **9 real**;
+  set `SEED_DEMO=0` on Railway.
+- **C1 + C2** (`backend_connection_plan`): DB-aware `/api/health` + `/api/leads/stats` computed from the real
+  workspace (new `api_adapters.compute_stats_from_leads`). +3 CONN tests; redeployed via `railway up`.
+Status now: ✅ **Deployed site shows real, live-crawled data.** Verified: offline suite **777 passed / 5
+skipped / 0 failed**; live `/api/health`→`db:"up"`, `/api/leads`→9 real brands (no `seed-lead-*`),
+`/api/leads/stats`→`discovered/retained=9, aboveFloor=6, strong=1, review=8` (reconciles). No graded contract
+touched. backend_connection_plan **C0–C2 ✅**; C3–C5 plan-only.
+Next PM should: Asaf asked "what's missing to try search/analyze from the app" → build the I5/C4 path: (a) set
+`ANTHROPIC_API_KEY`+`FIRECRAWL_API_KEY` on Railway (only `MONGO_URI`/`DB_NAME`/`SEED_DEMO` are set there now),
+(b) add a **background** live-discovery endpoint (a run takes 2–5 min — no sync request), (c) wire `/search`+
+`/swarm` (FE lane; their data hooks return empty since the mock purge). Otherwise the data half is done.
+Watch out for / open: (1) ICP screen still serves `SEED_ICP` (needs an `icp_documents` collection — conn-plan
+decision #2). (2) Brands outside the catalog still won't persist (Policy 1, by design). (3) Concurrent PM
+activity this afternoon (the 15:37/15:49 block + a possible FE session) caused a couple of "file modified by
+linter" events and a test-count bump — all-green, no conflict, but watch for interleaving. (4) Backend ships
+via `railway up` (not git); the catalog + C1/C2 + ingest script are uncommitted on `chore/claude-permissions`.
+
+## 2026-06-20 16:18 — [BACKEND] SESSION START (fresh PM; post-deploy, work-tree carries uncommitted C1/C2)
+Picking up: backend is **feature-complete + DEPLOYED + CONNECTED + PERSISTENT on real data.** No PLAN.md stage
+is mid-flight (Stages 0–14 ✅, Phase 3 I0–I4 ✅ / I5 deferred, Phase 4 D0–D4 ✅, Phase 5 C0 ✅; connection-plan
+C3–C5 plan-only). Read the full spine in order (PM_Methodology → PM_LOG → CLAUDE → PLAN → QA → NOTES →
+ORCHESTRATION).
+State as read (to re-verify before trusting any number): now on branch **`feat/lead-detail-endpoint`**. HEAD
+`3beaba5` (`GET /api/leads/{id}` → LeadDetail) is committed and claims **774 passed / 5 skipped**. On top of
+that the work tree carries **UNCOMMITTED C1/C2** (`backend_connection_plan`): DB-aware `/api/health`
+(CONN2: db `mock`/`up`/`down`), `/api/leads/stats` computed from `crm_store.all_leads()` not `SEED_STATS`
+(CONN3/CONN4), + the matching `TestCONNDbTruthful` tests + spine edits (NOTES/QA/PM_LOG/connection-plan) +
+untracked `scripts/ingest_real_leads.py`. The 16:16 GO-LIVE entry claims this lands the suite at **777 / 5
+skipped**. Live stack: FE Vercel `crm-asaf6.vercel.app` ↔ BE Railway `backend-production-77e4.up.railway.app`
+↔ Atlas `gtm_db.leads`=9 real athleisure leads.
+Plan for this session: (1) re-verify the offline baseline MYSELF in `.venv` from `Backend/` (`MONGO_URI` unset)
+to confirm the 777/5 the uncommitted tree claims; (2) NOT advance any stage or commit anything unprompted —
+surface the current state + the standing open-items menu to Asaf and let him pick. Re-verify any number before
+acting. Stay in lane (no `frontend/`). Write a SESSION END before stopping.
+
+## 2026-06-20 16:23 — [BACKEND] SESSION START (fresh PM; the 16:18 block has no END → interrupted)
+Note: the prior block above (16:18 START) has **no matching SESSION END** → it was interrupted before doing
+work (gap acknowledged, append-only honesty). Raising fresh, same pickup point.
+Picking up: backend is **feature-complete + DEPLOYED + CONNECTED + PERSISTENT on real data.** No PLAN.md stage
+is mid-flight (Stages 0–14 ✅, Phase 3 I0–I4 ✅ / I5 deferred, Phase 4 D0–D4 ✅, Phase 5 C0 ✅; connection-plan
+C0–C2 done, C3–C5 plan-only). Read the full spine in order (PM_Methodology → PM_LOG → CLAUDE → PLAN → QA →
+NOTES → ORCHESTRATION).
+State as read (to re-verify before trusting any number): on branch **`feat/lead-detail-endpoint`**, HEAD
+`3beaba5` (`GET /api/leads/{id}` → LeadDetail, committed). Work tree carries **UNCOMMITTED C1/C2**
+(`Backend/api_server.py`, `Backend/api_adapters.py`, `Backend/tests/test_api.py` modified) + spine edits
+(NOTES/QA/PM_LOG/`Plans/backend_connection_plan.md`) + untracked `Backend/scripts/ingest_real_leads.py`. The
+16:16 GO-LIVE entry claims this tree lands the offline suite at **777 passed / 5 skipped (S10 + 4 live) / 0
+failed** (`MONGO_URI` unset, mongomock). Live stack: FE Vercel `crm-asaf6.vercel.app` ↔ BE Railway
+`backend-production-77e4.up.railway.app` ↔ Atlas `gtm_db.leads`=9 real athleisure leads.
+Plan for this session: (1) re-verify the 777/5 offline baseline MYSELF in `.venv` from `Backend/` (`MONGO_URI`
+unset); (2) NOT advance any stage or commit anything unprompted — surface the current state + the standing
+open-items menu to Asaf and let him pick. Re-verify any number before acting. Stay in lane (no `frontend/`).
+Write a SESSION END before stopping.
+
+## 2026-06-20 16:25 — [BACKEND] SESSION END / HANDOFF (committed the green C1/C2 tree)
+Did: Re-verified the offline baseline MYSELF in `.venv` from `Backend/` (`MONGO_URI` unset) =
+**777 passed, 5 skipped (S10 + 4 live-gated), 0 failed** (33.7s) — matches the 16:16 claim exactly. Asaf
+picked "commit the green tree" from the open-items menu. Scanned the diff for secrets (clean — no hardcoded
+keys/URIs/connection-strings), then committed the uncommitted C1/C2 work as **`9e3302e`** on
+`feat/lead-detail-endpoint`: `feat(api): DB-aware /api/health + compute /api/leads/stats from the workspace
+(C1/C2)` — 7 files (`Backend/api_server.py`, `api_adapters.py`, `tests/test_api.py`,
+`scripts/ingest_real_leads.py`, `NOTES.md`, `QA_checklist.md`, `Plans/backend_connection_plan.md`). PM_LOG.md
+committed separately with this entry. No graded contract touched (tool count 10, `answer_question`,
+`FALLBACK_MESSAGE` byte-stable). Did **NOT** push (push/PR needs Asaf).
+Status now: ✅ Working tree clean (C1/C2 locked in). Stages 0–14 ✅, Phase 3 I0–I4 ✅, Phase 4 D0–D4 ✅,
+Phase 5 C0–C2 ✅; connection-plan C3–C5 plan-only. Branch `feat/lead-detail-endpoint` HEAD now `9e3302e`.
+Next PM should: await Asaf's pick from the standing open-items menu — (a) push `feat/lead-detail-endpoint`
++ open a PR to `main`; (b) live search/analyze from the app (I5/C4: ANTHROPIC+FIRECRAWL keys on Railway +
+a background discovery endpoint + wire `/search`+`/swarm`, FE lane); (c) ICP persistence (C3 —
+`icp_documents` collection so `/api/icp` stops serving `SEED_ICP`); (d) deploy/security hygiene (Vercel
+Deployment Protection off for a public URL + rotate ANTHROPIC/FIRECRAWL keys).
+Watch out for / open: (1) branch is named `feat/lead-detail-endpoint` but now also carries C1/C2 — if a
+clean per-feature PR is wanted, split before opening. (2) NOT pushed — local only. (3) NEVER run the full
+suite with `MONGO_URI` set (tests assume a fresh store per test). (4) Frontend is a separate PM lane.
