@@ -90,8 +90,22 @@ class FindMoreRequest(BaseModel):
 
 @app.get("/api/health")
 async def health() -> dict:
-    """INTG3: liveness probe."""
-    return {"status": "ok"}
+    """INTG3 / CONN2: liveness + DB-awareness probe.
+
+    When MONGO_URI is set, pings Mongo (admin 'ping') and reports db: "up"|"down".
+    When unset (offline/mongomock), reports db: "mock". A down/unreachable Mongo
+    returns a graceful degraded body (status "degraded"), never a 500/hang.
+    db is imported lazily so import-safety (ENV4) is preserved.
+    """
+    import db  # lazy — no client built at import
+
+    if not db.using_real_mongo():
+        return {"status": "ok", "db": "mock"}
+    try:
+        db.get_mongo_client().admin.command("ping")
+        return {"status": "ok", "db": "up"}
+    except Exception:  # noqa: BLE001 — surface as degraded, never crash
+        return {"status": "degraded", "db": "down"}
 
 
 # ---------------------------------------------------------------------------
@@ -121,15 +135,18 @@ async def get_leads() -> list:
 
 @app.get("/api/leads/stats")
 async def get_leads_stats() -> dict:
-    """INTG4: GET /api/leads/stats → LeadDiscoveryStats.
+    """INTG4 / CONN3: GET /api/leads/stats → LeadDiscoveryStats.
 
-    Returns the seed stats dict mapped through stats_to_ui (camelCase).
-    api_seed and api_adapters are imported lazily.
+    Computes the funnel from the REAL persisted workspace (crm_store.all_leads),
+    not the static SEED_STATS — so the dashboard header reflects the actual DB.
+    Blacklisted records are excluded pre-compute. crm_store and api_adapters are
+    imported lazily (import-safety / INTG1).
     """
-    import api_seed         # lazy
+    import crm_store        # lazy
     import api_adapters     # lazy
 
-    return api_adapters.stats_to_ui(api_seed.SEED_STATS)
+    leads = [r for r in crm_store.all_leads() if r.get("current_status") != "Blacklisted"]
+    return api_adapters.compute_stats_from_leads(leads)
 
 
 @app.post("/api/leads/find-more")

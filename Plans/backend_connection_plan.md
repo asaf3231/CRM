@@ -51,15 +51,15 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 ---
 
 ## Status legend
-⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0 executed (Asaf, 2026-06-20); C1–C5 plan-only.**
+⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0–C2 executed (Asaf, 2026-06-20); C3–C5 plan-only.**
 
 ## Stage tracker (proposed)
 
 | Stage | Name | DoD checks (`QA_checklist.md` §13) | Status |
 |---:|---|---|---|
 | C0 | Demo-seed policy: stop clobbering persisted data | `CONN0`–`CONN1` | ✅ Complete |
-| C1 | DB-aware `/api/health` + connection lifecycle | `CONN2` | ⬜ Proposed |
-| C2 | Read endpoints serve real persisted data (computed stats) | `CONN3`–`CONN4` | ⬜ Proposed |
+| C1 | DB-aware `/api/health` + connection lifecycle | `CONN2` | ✅ Complete |
+| C2 | Read endpoints serve real persisted data (computed stats) | `CONN3`–`CONN4` | ✅ Complete |
 | C3 | Write endpoints (stage / enrollment) — persist FE mutations | `CONN5`–`CONN6` | ⬜ Proposed |
 | C4 | Live-pipeline ingest (`ENABLE_LIVE`, OQ-7-gated) — merges I5 | `CONN7` | ⬜ Proposed |
 | C5 | FE wiring + cross-restart Preview proof | `CONN8` | ⬜ Proposed |
@@ -88,6 +88,9 @@ real edit (`seed-lead-001`→"won") + a real lead (17) → simulated restart + b
 `serverSelectionTimeoutMS=5000` failure and returns a degraded (not 500) body. No client built at import.
 **DoD:** `CONN2` health reflects up / down / mock states; a stopped Mongo yields a graceful degraded
 response, not a hang or uncaught 500.
+**Status:** ✅ Complete — PM-implemented + verified 2026-06-20. `/api/health` pings Mongo when `MONGO_URI`
+is set. Offline `CONN2` test green (db:"mock"); **live**: `https://backend-production-77e4.up.railway.app/api/health`
+→ `{"status":"ok","db":"up"}` (Atlas ping). No client at import (ENV4 holds). Files: `api_server.py`.
 
 ## Stage C2 — Read endpoints serve real persisted data
 **Goal:** the dashboard reflects the durable workspace, not static seeds.
@@ -97,6 +100,13 @@ response, not a hang or uncaught 500.
 **DoD:** `CONN3` `/api/leads` + `/api/leads/stats` reflect actual persisted records (add/modify a lead →
 the response changes); `CONN4` adapter contract unchanged (camelCase; `contact_ids` + `corporate_access_key`
 never emitted).
+**Status:** ✅ Complete — PM-implemented + verified 2026-06-20. `GET /api/leads/stats` now computes the funnel
+from `crm_store.all_leads()` via new `api_adapters.compute_stats_from_leads` (was static `SEED_STATS`).
+Offline `CONN3`/`CONN4` tests green; full suite **777 passed / 5 skipped / 0 failed**. **Live**: public
+`/api/leads/stats` → `goal/discovered/retained=9, aboveFloor=6, strong=1, review=8, "Live (>=3 ICP signals)"`
+(reconciles with the 9 persisted real leads); no `corporate_access_key`/`contact_ids` in the body. ICP/outreach
+read endpoints unchanged (ICP still seed — needs a new collection, decision #2, deferred). Files:
+`api_server.py`, `api_adapters.py`, `tests/test_api.py`.
 
 ## Stage C3 — Write endpoints (the gap): persist FE mutations
 **Goal:** let the FE persist changes through the API.

@@ -317,6 +317,56 @@ def stats_to_ui(stats: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# compute_stats_from_leads — derive LeadDiscoveryStats from real persisted leads
+# (CONN3) — replaces the static SEED_STATS so the funnel reflects the DB.
+# ---------------------------------------------------------------------------
+
+_WIN_PROB_FLOOR = 0.5  # win_prob floor for the "above floor" funnel band
+
+
+def compute_stats_from_leads(leads: list) -> dict:
+    """Compute the LeadDiscoveryStats funnel from the persisted lead records.
+
+    Every number is derived from the durable workspace (no static seed). All
+    persisted leads are, by construction, retained/qualified (they cleared the
+    ICP gate at ingest), so discovered == retained == len(leads); the narrowing
+    band is win_prob >= _WIN_PROB_FLOOR.
+
+    FitGrade buckets: Strong → strong, Medium → review, Weak → weak.
+    LeadKind: Active_Client → existing, else → new.
+
+    Args:
+        leads: list of CRM lead records (from crm_store.all_leads()).
+
+    Returns:
+        dict in the camelCase LeadDiscoveryStats shape (same keys as stats_to_ui).
+    """
+    retained = len(leads)
+    above = sum(1 for l in leads if l.get("win_prob", 0) >= _WIN_PROB_FLOOR)
+    strong = sum(1 for l in leads if fit_grade(l.get("icp_count", 0)) == "Strong")
+    review = sum(1 for l in leads if fit_grade(l.get("icp_count", 0)) == "Medium")
+    weak = sum(1 for l in leads if fit_grade(l.get("icp_count", 0)) == "Weak")
+    existing = sum(1 for l in leads if lead_kind(l.get("current_status", "")) == "Existing")
+    in_crm = sum(1 for l in leads if l.get("stage") == "in_crm")
+
+    return {
+        "goal": retained,
+        "discovered": retained,
+        "filteredByIcp": 0,
+        "retained": retained,
+        "belowFloor": retained - above,
+        "aboveFloor": above,
+        "newCount": retained - existing,
+        "existingCount": existing,
+        "alreadyInCrm": in_crm,
+        "strong": strong,
+        "review": review,
+        "weak": weak,
+        "strictness": "Live (>=3 ICP signals)",
+    }
+
+
 # ===========================================================================
 # Stage I3 — Outreach adapters (INTG7 / INTG8)
 # Map the deterministic run_outreach_pipeline-shaped return → the FE Outreach
