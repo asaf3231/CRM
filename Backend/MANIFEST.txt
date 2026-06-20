@@ -1,10 +1,17 @@
 # MANIFEST.txt — ReactFirst AI Proactive Outbound Engine
 # Stage 9 packaging allowlist (H5).
 #
+# Location (2026-06-20 monorepo reorg):
+#   This file and ALL shipped code now live under Backend/. The allowlist paths
+#   below are RELATIVE TO Backend/ (e.g. main.py == Backend/main.py). The dev-only
+#   PM/management files (CLAUDE.md, PLAN.md, QA_checklist.md, NOTES.md, PM_LOG.md,
+#   ORCHESTRATION.md, PM_Methodology_Prompt.md, briefs/, handbacks/, Plans/) live at
+#   the REPO ROOT (Backend/'s parent), so they are naturally outside this bundle.
+#
 # Purpose:
 #   This file lists the EXACT set of files that constitute the shipped
-#   deliverable. Any build/bundle script must copy FROM this allowlist —
-#   never zip the whole directory.
+#   deliverable. Any build/bundle script must copy FROM this allowlist (relative
+#   to Backend/) — never zip the whole directory.
 #
 # Allowlist decision (Stage 9, 2026-06-18; db.py added Phase 4, 2026-06-20):
 #   Shipped: main.py, db.py, lead_store.py, crm_store.py, rag_engine.py,

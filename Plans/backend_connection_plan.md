@@ -51,13 +51,13 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 ---
 
 ## Status legend
-⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **all rows below are ⬜ (plan only).**
+⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0 executed (Asaf, 2026-06-20); C1–C5 plan-only.**
 
 ## Stage tracker (proposed)
 
-| Stage | Name | DoD checks (to be added to `QA_checklist.md` §13) | Status |
+| Stage | Name | DoD checks (`QA_checklist.md` §13) | Status |
 |---:|---|---|---|
-| C0 | Demo-seed policy: stop clobbering persisted data | `CONN0`–`CONN1` | ⬜ Proposed |
+| C0 | Demo-seed policy: stop clobbering persisted data | `CONN0`–`CONN1` | ✅ Complete |
 | C1 | DB-aware `/api/health` + connection lifecycle | `CONN2` | ⬜ Proposed |
 | C2 | Read endpoints serve real persisted data (computed stats) | `CONN3`–`CONN4` | ⬜ Proposed |
 | C3 | Write endpoints (stage / enrollment) — persist FE mutations | `CONN5`–`CONN6` | ⬜ Proposed |
@@ -74,6 +74,12 @@ when `MONGO_URI` is set and the workspace is non-empty, **skip** the demo seed. 
 (no `MONGO_URI`) seeding the demo so the FE dev experience is unchanged.
 **DoD:** `CONN0` with a persisted non-empty `leads` collection, a server restart does **not** modify
 existing records; `CONN1` offline (mongomock) demo still seeds (FE dev unchanged). Import-safety preserved.
+**Status:** ✅ Complete — executed via `swe-executer` + PM-verified 2026-06-20. `api_seed.seed_demo()` is now
+seed-if-empty (skips when `leads` is non-empty) + a `SEED_DEMO` opt-out; `api_server.py` lifespan unchanged.
+Offline suite **768 passed, 5 skipped** (+3 CONN tests); **live proof** (Docker Mongo): boot1 seeded 16 →
+real edit (`seed-lead-001`→"won") + a real lead (17) → simulated restart + boot2 **skipped** (count 17, the
+"won" edit + real lead intact). No graded contract touched. Files: `Backend/api_seed.py`,
+`Backend/tests/test_api.py` (+`TestSeedDemoGuard`).
 
 ## Stage C1 — DB-aware `/api/health` + connection lifecycle
 **Goal:** surface real DB connectivity; reuse the shared client.

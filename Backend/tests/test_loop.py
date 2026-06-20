@@ -185,16 +185,29 @@ class TestL1RawAPIShape:
         main.answer_question("q", catalog_df=None, policies="p")
         assert fc.call_args_list[0]["model"] == main.REASONING_MODEL
 
-    def test_thinking_adaptive_passed(self, fake_client):
-        """L1: adaptive thinking parameter is passed (no temperature/budget_tokens)."""
+    def test_thinking_adaptive_passed(self, fake_client, monkeypatch):
+        """L1: adaptive thinking is applied WHEN the installed SDK supports it
+        (feature-gated via _thinking_kwargs — older SDKs that reject the kwarg
+        degrade gracefully). No temperature/budget_tokens ever."""
         fc = fake_client([_end_turn()])
+        # Simulate an SDK whose messages.create accepts `thinking`.
+        monkeypatch.setattr(main, "_THINKING_SUPPORTED", True)
         main.answer_question("q", catalog_df=None, policies="p")
         call = fc.call_args_list[0]
         assert call.get("thinking") == {"type": "adaptive"}, (
-            "Loop must pass thinking={'type':'adaptive'}"
+            "Loop must pass thinking={'type':'adaptive'} when the SDK supports it"
         )
         assert "temperature" not in call, "temperature must NOT be passed (400 on 4.7+)"
         assert "budget_tokens" not in call, "budget_tokens must NOT be passed"
+
+    def test_thinking_omitted_when_sdk_unsupported(self, fake_client, monkeypatch):
+        """L1: when the SDK does not support `thinking`, the loop omits it (so the
+        reasoning call still runs on a pinned SDK like anthropic==0.40.0)."""
+        fc = fake_client([_end_turn()])
+        monkeypatch.setattr(main, "_THINKING_SUPPORTED", False)
+        main.answer_question("q", catalog_df=None, policies="p")
+        call = fc.call_args_list[0]
+        assert "thinking" not in call, "thinking must be omitted when SDK can't accept it"
 
     def test_no_framework_imports(self):
         """L5: no LangGraph / LangChain / SDK tool-runner imports anywhere in main.py."""

@@ -1013,3 +1013,94 @@ class TestINTG8EnrollmentsAndMockSplit:
         assert out[0]["label"] == "Cohort 1 enrolled"
         assert out[0]["date"] == "2026-03-31"
         assert out[1]["date"] == "2026-04-01"
+
+
+# ---------------------------------------------------------------------------
+# CONN0 / CONN1 — seed-if-empty guard (Stage C0)
+# ---------------------------------------------------------------------------
+
+class TestSeedDemoGuard:
+    """CONN0 / CONN1: seed_demo() seed-if-empty guard and SEED_DEMO opt-out.
+
+    Each test starts with an empty workspace because the autouse reset_singletons
+    fixture (conftest.py) resets crm_store._leads_collection to None before every test,
+    so get_crm_collection() will build a fresh empty mongomock collection on first use.
+    """
+
+    def test_conn1_empty_workspace_seeds_16_records(self):
+        """CONN1 — seed_demo() on an empty (fresh) workspace inserts all 16 demo leads."""
+        import crm_store
+        import api_seed
+
+        # Workspace is empty (conftest reset + fresh mongomock)
+        api_seed.seed_demo()
+
+        count = crm_store.get_crm_collection().count_documents({})
+        assert count == 16, (
+            f"Expected 16 demo leads after seed_demo() on empty workspace, got {count}"
+        )
+
+    def test_conn0_nonempty_workspace_is_not_clobbered(self):
+        """CONN0 — seed_demo() does NOT overwrite a non-empty workspace.
+
+        Pre-inserts:
+          - a 'real' lead with uniq_id='real-lead-001'
+          - a demo-id lead (seed-lead-001) with a sentinel domain field
+
+        After seed_demo():
+          - count must still be 2 (not 18 or any other number)
+          - the sentinel demo record must still carry domain='DO-NOT-OVERWRITE.example'
+        """
+        import crm_store
+        import api_seed
+
+        # Pre-populate the workspace with 2 records BEFORE seed_demo() runs
+        crm_store.upsert_lead({
+            "uniq_id": "real-lead-001",
+            "domain": "real-customer.example",
+            "company": "Real Customer",
+            "status": "qualified",
+            "stage": "in_crm",
+            "win_prob": 0.75,
+        })
+        crm_store.upsert_lead({
+            "uniq_id": "seed-lead-001",
+            "domain": "DO-NOT-OVERWRITE.example",  # sentinel — must survive seed_demo()
+            "company": "Sentinel Record",
+            "status": "qualified",
+            "stage": "in_crm",
+            "win_prob": 0.50,
+        })
+
+        count_before = crm_store.get_crm_collection().count_documents({})
+        assert count_before == 2, f"Pre-condition failed: expected 2 records, got {count_before}"
+
+        # Call seed_demo() — must skip because workspace is non-empty
+        api_seed.seed_demo()
+
+        count_after = crm_store.get_crm_collection().count_documents({})
+        assert count_after == 2, (
+            f"seed_demo() modified a non-empty workspace: count went from 2 to {count_after}"
+        )
+
+        # The sentinel demo record must NOT have been overwritten
+        sentinel = crm_store.get_crm_collection().find_one({"uniq_id": "seed-lead-001"})
+        assert sentinel is not None, "sentinel record (seed-lead-001) was deleted"
+        assert sentinel.get("domain") == "DO-NOT-OVERWRITE.example", (
+            f"sentinel domain was overwritten: got {sentinel.get('domain')!r}"
+        )
+
+    def test_conn0_seed_demo_env_opt_out(self, monkeypatch):
+        """CONN0 — SEED_DEMO=0 prevents seeding even on an empty workspace."""
+        import crm_store
+        import api_seed
+
+        monkeypatch.setenv("SEED_DEMO", "0")
+
+        # Workspace is empty — but SEED_DEMO=0 should prevent seeding
+        api_seed.seed_demo()
+
+        count = crm_store.get_crm_collection().count_documents({})
+        assert count == 0, (
+            f"Expected 0 records with SEED_DEMO=0, got {count}"
+        )

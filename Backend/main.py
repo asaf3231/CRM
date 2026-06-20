@@ -3066,6 +3066,28 @@ _SYSTEM_PROMPT_TEMPLATE = (
 _LOOP_MAX_TOKENS = 4096
 
 
+# Adaptive thinking (CLAUDE.md §1.2) is applied only when the installed anthropic
+# SDK's messages.create accepts a `thinking` param. Older pinned SDKs (e.g. 0.40.0)
+# reject the kwarg ("unexpected keyword argument 'thinking'"); we feature-detect
+# once and degrade gracefully so the reasoning loop still runs. The param is passed
+# automatically again on any SDK version that supports it — no spec change.
+_THINKING_SUPPORTED = None
+
+
+def _thinking_kwargs(client):
+    """Return {'thinking': {'type': 'adaptive'}} iff the SDK supports it, else {}."""
+    global _THINKING_SUPPORTED
+    if _THINKING_SUPPORTED is None:
+        try:
+            import inspect
+            _THINKING_SUPPORTED = "thinking" in inspect.signature(
+                client.messages.create
+            ).parameters
+        except Exception:
+            _THINKING_SUPPORTED = False
+    return {"thinking": {"type": "adaptive"}} if _THINKING_SUPPORTED else {}
+
+
 def answer_question(
     query: str,
     catalog_df: pd.DataFrame = None,
@@ -3155,7 +3177,7 @@ def answer_question(
                     system=system_prompt,
                     tools=TOOL_SCHEMAS,
                     messages=messages,
-                    thinking={"type": "adaptive"},
+                    **_thinking_kwargs(client),
                 )
             except _anthropic.BadRequestError as bad_req:
                 # RS1: HTTP 400 — malformed request / oversized input.

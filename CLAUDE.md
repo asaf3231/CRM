@@ -139,36 +139,47 @@ API keys come from environment variables (`os.environ`), never hardcoded and nev
 
 Expected project layout. **Layout decision (locked 2026-06-18):** `main.py` is the orchestrator and entry point; the stateful / heavy-dependency concerns live in their own modules beside it so the pipeline stays reviewable and each tool tests in isolation.
 
-> **⚠ LAYOUT UPDATE (2026-06-20, Asaf-approved reorg):** all backend code + the 3 runtime data files + `angle_corpus.json` + `tests/` + `scripts/` + `assets/` + `requirements.txt` + `docker-compose.yml` + `MANIFEST.txt` + `.env.example` now live under a self-contained **`Backend/`** directory (mirrors `frontend/`). PM/spine docs (`CLAUDE.md`, `PLAN.md`, `NOTES.md`, `QA_checklist.md`, `data_plan.md`, `PM_LOG.md`, `ORCHESTRATION.md`, `briefs/`, `handbacks/`) stay at the **repo root**. **The runtime cwd is now `Backend/`** — run `cd Backend && uvicorn api_server:app` and `cd Backend && python -m pytest tests/`. The tree below still reads correctly **relative to `Backend/`** (no module imports or path logic changed; paths are `__file__`/`os.getcwd()`-relative). Verified: full suite from `Backend/` = 765 passed / 5 skipped / 0 failed; ENV4 holds. Details in `NOTES.md` (2026-06-20 senior-PM entry).
+> **⚠ LAYOUT UPDATE (2026-06-20, Asaf-approved reorg):** all backend code + the 3 runtime data files + `angle_corpus.json` + `tests/` + `scripts/` + `assets/` + `requirements.txt` + `docker-compose.yml` + `MANIFEST.txt` + `.env.example` now live under a self-contained **`Backend/`** directory (mirrors `frontend/`). PM/spine docs (`CLAUDE.md`, `PLAN.md`, `NOTES.md`, `QA_checklist.md`, `data_plan.md`, `PM_LOG.md`, `ORCHESTRATION.md`, `briefs/`, `handbacks/`) stay at the **repo root**. **The runtime cwd is now `Backend/`** — run `cd Backend && uvicorn api_server:app` and `cd Backend && python -m pytest tests/`. The tree below now shows the **full monorepo layout** (no module imports or path logic changed; paths are `__file__`/`os.getcwd()`-relative). Verified: full suite from `Backend/` = **768 passed / 5 skipped / 0 failed** (765 Phase-4 + 3 Phase-5 C0); ENV4 holds. Details in `NOTES.md` (2026-06-20 entries).
 
 ```text
-CRM/                                  # working dir == runtime cwd
-│  # --- code ---
-├── main.py                            # orchestrator: config, the tools (10), schemas, dispatch, agentic loop, policy wiring, L6 outreach engine, main()
-├── db.py                             # shared lazy Mongo connection layer (Phase 4): pymongo if MONGO_URI set, else mongomock fallback
-├── lead_store.py                     # MongoDB-backed CRM *contacts* store (via db.py) + Policy 4 corporate_access_key auth gate
-├── crm_store.py                      # MongoDB-backed mini-CRM *lead workspace* (L5, via db.py): lazy singleton; lead state/profile/win-prob (Phase 2)
-├── rag_engine.py                     # ChromaDB (all-MiniLM-L6-v2) + BM25 + RRF tiering — the lazy local vector store
-├── requirements.txt                  # pinned deps
-├── docker-compose.yml                # local-dev MongoDB (mongo:7 + named volume) for the Phase-4 persistence layer (optional infra)
-├── .env.example                      # env template (MONGO_URI / DB_NAME); real values go in a gitignored .env — never committed
-├── scripts/seed_db.py                # idempotent DB seed (seed-if-empty); loads contacts.json into the configured Mongo
-│  # --- runtime data: the three bounded inputs (single source of truth — PRD §2; NOT business logic) ---
-├── brands_catalog.csv                # the 9-column Brands Data Catalog (schema in §4)
-├── contacts.json                     # CRM contact records, loaded into MongoDB (via db.py) by lead_store.py on first call, seed-if-empty (schema in §4.1)
-├── gtm_policies.txt                  # the GTM operational policy matrix parsed before any outbound state
-│  # --- runtime artifacts (produced by a run) ---
-├── reactfirst_run.log                # the agentic run log (literals — §7)
-├── assets/                           # saved ReactFirst Narrative-Analysis PDFs (request_reactfirst_pdf output)
-├── .chroma/                          # local Chroma persistence (lazy-built; gitignored; never shipped)
-│  # --- dev-only management files ---
-├── CLAUDE.md                         # permanent project rules (this file)
-├── PLAN.md                           # stage tracker and active plan
-├── QA_checklist.md                   # TDD blueprint; every stage DoD references it
-├── NOTES.md                          # decisions, verified facts, handbacks, open questions
-├── Architecture Specification & Product Requirements Document (PRD).pdf
-├── Reference/                        # quality benchmark from a prior project (never shipped)
-└── tests/                            # dev-only TDD suite (never shipped)
+CRM/                                   # repo root (monorepo; the shared .venv lives here)
+│
+├── Backend/                           # ⟵ the Python engine — RUNTIME CWD (run `python main.py` / `pytest` from here)
+│   │  # --- code ---
+│   ├── main.py                        # orchestrator: config, the 10 tools, schemas, dispatch, agentic loop, policies, L6 outreach, main()
+│   ├── db.py                          # shared lazy Mongo connection layer (Phase 4): pymongo if MONGO_URI set, else mongomock fallback
+│   ├── lead_store.py                  # MongoDB-backed CRM *contacts* store (via db.py) + Policy 4 corporate_access_key auth gate
+│   ├── crm_store.py                   # MongoDB-backed mini-CRM *lead workspace* (L5, via db.py): lazy singleton; state/profile/win-prob
+│   ├── rag_engine.py                  # ChromaDB (all-MiniLM-L6-v2) + BM25 + RRF tiering — the lazy local vector store
+│   ├── api_server.py                  # Phase-3 FastAPI server (FE↔BE); api_seed.py + api_adapters.py support it (additive; not the graded engine)
+│   ├── requirements.txt               # pinned deps
+│   ├── MANIFEST.txt                   # shipped-deliverable allowlist (paths relative to Backend/)
+│   ├── docker-compose.yml             # local-dev MongoDB (mongo:7 + named volume) for the Phase-4 persistence layer (optional infra)
+│   ├── .env.example                   # env template (MONGO_URI / DB_NAME); real values in a gitignored Backend/.env — never committed
+│   ├── scripts/seed_db.py             # idempotent DB seed (seed-if-empty); loads contacts.json into the configured Mongo
+│   │  # --- runtime data: the three bounded inputs (single source of truth — PRD §2; NOT business logic) ---
+│   ├── brands_catalog.csv             # the 9-column Brands Data Catalog (schema in §4)
+│   ├── contacts.json                  # CRM contact records, loaded into MongoDB (via db.py) by lead_store.py on first call, seed-if-empty (§4.1)
+│   ├── gtm_policies.txt               # the GTM operational policy matrix parsed before any outbound state
+│   ├── angle_corpus.json              # the RAG angle corpus (shipped)
+│   │  # --- runtime artifacts (produced by a run; gitignored / never shipped) ---
+│   ├── reactfirst_run.log             # the agentic run log (literals — §7)
+│   ├── assets/                        # saved ReactFirst Narrative-Analysis PDFs (request_reactfirst_pdf output)
+│   ├── .chroma/                       # local Chroma persistence (lazy-built; gitignored; never shipped)
+│   └── tests/                         # dev-only TDD suite (never shipped)
+│
+├── frontend/                          # React/Vite GTM dashboard (separate PM lane; backend mocked behind src/lib/api.ts)
+├── Plans/                             # data_plan.md, backend_connection_plan.md, the PRD, Assigment.md, SLED findings
+│  # --- PM spine / management files (repo root; dev-only) ---
+├── CLAUDE.md                          # permanent project rules (this file)
+├── PLAN.md                            # backend stage tracker
+├── QA_checklist.md                    # TDD blueprint; every stage DoD references it
+├── NOTES.md                           # decisions, verified facts, handbacks, open questions
+├── PM_LOG.md                          # PM→PM session handoff log
+├── ORCHESTRATION.md / PM_Methodology_Prompt.md   # the autonomous PM↔executer loop protocol + the PM role
+├── briefs/ / handbacks/               # the per-stage PM↔executer mailbox
+├── Reference/ / Images/               # quality benchmark + UI reference shots (never shipped)
+└── .venv/                             # shared virtualenv (repo root)
 ```
 
 Source-of-truth rules:

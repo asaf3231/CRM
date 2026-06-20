@@ -336,15 +336,33 @@ _SEED_RECORDS: list = [
 # ---------------------------------------------------------------------------
 
 def seed_demo() -> None:
-    """Upsert the 16 deterministic seed lead records into crm_store.
+    """Seed the 16 deterministic lead records into crm_store — seed-if-empty only.
 
     Called ONLY from the ASGI lifespan in api_server.py (never at import time).
-    Idempotent: repeated calls upsert (update-in-place on uniq_id), not append.
     crm_store is imported lazily here so `import api_seed` stays side-effect-free.
+
+    Seeding logic (CONN0 / CONN1):
+      1. If the env var SEED_DEMO is set to one of {"0", "false", "no", "off"}
+         (case-insensitive), return immediately — operator opt-out.
+      2. If the leads workspace is non-empty (count_documents({}) > 0), return
+         immediately — seed-if-empty guard; never clobber persisted data.
+      3. Only when the workspace is empty (and not opted out) are the 16
+         _SEED_RECORDS upserted.  On a fresh offline mongomock workspace
+         (always empty at boot) the FE dev data is seeded as before (CONN1).
 
     No corporate_access_key is set or referenced anywhere here (G4).
     """
+    import os
+
+    seed_flag = os.environ.get("SEED_DEMO", "1").strip().lower()
+    if seed_flag in {"0", "false", "no", "off"}:
+        return  # operator opted out
+
     import crm_store  # lazy — never at module top-level
+
+    collection = crm_store.get_crm_collection()
+    if collection.count_documents({}) > 0:
+        return  # workspace already has data — never overwrite
 
     for record in _SEED_RECORDS:
         crm_store.upsert_lead(record)

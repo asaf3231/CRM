@@ -1,0 +1,17 @@
+# Never bake secrets or machine-local/generated artifacts into the image.
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.chroma/
+assets/
+*.log
+qualified_leads.json
+tests/
+.DS_Store
+docker-compose.yml
+Dockerfile
+.dockerignore

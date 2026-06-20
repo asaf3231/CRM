@@ -422,3 +422,28 @@ contacts. New checks CONN0/CONN1 (QA §13).
 Plan: add QA §13 (CONN0/CONN1); brief + spawn `swe-executer` for C0; PM-verify offline green + live (seed
 into empty real Mongo, restart → not clobbered; mark a lead, restart → unchanged); flip C0 ✅ in the
 connection plan; SESSION END.
+
+## 2026-06-20 13:40 — [BACKEND] SESSION END / HANDOFF — C0 done + REPO REORG noted
+Did: Executed **C0** (`backend_connection_plan.md`) via `swe-executer` + PM verification. `api_seed.seed_demo()`
+is now **seed-if-empty** (skips when the `leads` workspace is non-empty) + a `SEED_DEMO` env opt-out;
+`api_server.py` lifespan unchanged. Offline suite **768 passed, 5 skipped** (765 + 3 new `TestSeedDemoGuard`
+CONN tests); **live no-clobber proof** vs Docker Mongo: boot1 seeded 16 → real edit (`seed-lead-001`→"won")
++ a real lead (17) → simulated restart + boot2 SKIPPED (count 17, "won" edit + real lead intact). No graded
+contract touched. Flipped C0 ✅ in the connection plan; added QA §13 (CONN0/CONN1).
+**IMPORTANT — repo was REORGANIZED mid-session (by Asaf, ~13:37):** the project is now a monorepo —
+- **`Backend/`** = all Python code + tests + runtime data + `requirements.txt` + `MANIFEST.txt` +
+  `docker-compose.yml` + `scripts/` (everything that was at root). Run with the **root `.venv`** from cwd `Backend/`.
+- **root** = PM/management files (`CLAUDE.md`, `PLAN.md`, `QA_checklist.md`, `NOTES.md`, `PM_LOG.md`,
+  `ORCHESTRATION.md`, `PM_Methodology_Prompt.md`, `briefs/`, `handbacks/`) + `frontend/` + `Reference/`/`Images/`.
+- **`Plans/`** (new) = `data_plan.md`, `backend_connection_plan.md`, the PRD, `Assigment.md`,
+  `FINDINGS_SLED_CROSSREF.md`, `GTM_Engine_KB_SLED_AI.md`. Also new at root: `GO_LIVE_CONFIG.md`.
+All my Phase-4 work + the C0 change survived the move intact (verified). The `swe-executer` adapted to the
+new paths automatically.
+Status now: ✅ C0 complete & verified. Phase 4 (D0–D4) ✅. Connection plan C1–C5 still plan-only.
+Next PM should: **doc-drift from the reorg needs reconciling (flagged to Asaf, not yet done):** `CLAUDE.md`
+§2 layout tree still describes the OLD flat root layout (now wrong — code is under `Backend/`); paths in
+`MANIFEST.txt`/CLAUDE/NOTES that imply root need a `Backend/` prefix review. Do this only once Asaf confirms
+the new structure is final. If continuing the connection plan, C1 (DB-aware `/api/health`) is next.
+Watch out for / open: (1) Docker Mongo `reactfirst-mongo` still up on :27017 (now `docker compose` lives in
+`Backend/`). (2) Run the suite from cwd `Backend/` with the root `.venv`, `MONGO_URI` unset. (3) Everything
+remains uncommitted. (4) Frontend is a separate PM lane.
