@@ -48,7 +48,7 @@ Status values:
 | 12 | L5b — Profile Expander / contact discovery (`discover_contacts`) | `DISC1`–`DISC5` | ✅ Complete |
 | 13 | L6a — Outreach Engine core (cohorts + dispatch + escalation) | `OUT1`–`OUT6` | ✅ Complete |
 | 14 | L6b — Outreach Center + end-to-end wiring + packaging | `OUT7`–`OUT10`, re-run `INT1`–`INT3`, `H1`–`H5` | ✅ Complete |
-| — | **Phase 3 — Integration Layer (FastAPI; make FE↔BE talk)** | (Asaf, 2026-06-19; PM-cross-reviewed) | 🔄 In progress |
+| — | **Phase 3 — Integration Layer (FastAPI; make FE↔BE talk)** | (Asaf, 2026-06-19; PM-cross-reviewed) | ✅ v1 complete (I0–I4; I5 deferred) |
 | I0 | Dependency version-lock gate | `INTG0` | ✅ Complete |
 | I1 | API scaffold + import-safety + conftest | `INTG1`–`INTG3` | ✅ Complete |
 | I2 | Leads + ICP endpoints + adapters + seed | `INTG4`–`INTG6` | ✅ Complete |
@@ -538,28 +538,34 @@ Do not mark a stage complete if its QA checks were only drafted but not run.
 
 ## Current project state
 
-- **Current stage:** **PROJECT COMPLETE — all backend stages ✅.** Stages 0–9 ✅ (the original ReactFirst
-  pipeline); Phase 2 Stages 10–14 ✅ (L1 ICP Builder, L5a mini-CRM, L5b contact discovery, L6a outreach
-  core, **L6b Outreach Center + end-to-end `main()` wiring + packaging**). Phase 2 added SLED parity
-  L1+L5+L6 as a CRM system (re-skin). Nothing remains queued on the backend.
-- **Current baseline (PM-verified 2026-06-19):** `tests/` = **684 passed, 1 skipped (S10), 0 failed**, ENV4 +
-  G1/G4 grep clean. *(647 at Stage 13 close + 31 Stage-14 + 6 Stage-14-r1 = 684.)*
-- **Completed Phase 1:** Stage 0 ✅; Stage 1 ✅ (43/43); Stage 2 ✅ (122/122 + probes); Stage 3 ✅ (76/1 skip);
-  Stage 4 ✅ (36/36, +3 harness fixes, +1 CAT5 leak); Stage 5 ✅ (1 retry — Policy-6 termination); Stage 6 ✅
-  (1 retry — tier floor); Stage 7 ✅ (E2E 10/10); Stage 8 ✅ (2 PM test fixes); Stage 9 ✅ (1 retry — int64
-  JSON defect). Premium/Policy 3 removed post-Stage-9 → baseline 471.
-- **Phase 2 plan:** Stages 10–14 (see sections above + `~/.claude/plans/steady-whistling-yao.md`). New QA:
-  `ICPB*`/`CRM*`/`DISC*`/`OUT*` (`QA_checklist.md` §10). Contract changes (tool count 8→10, new
-  `crm_store.py`, L6 post-loop engine) recorded in `NOTES.md` and approved via the plan gate.
-- **LLM provider:** **Claude** (Opus 4.8 / Sonnet 4.6 / Haiku 4.5) via the `anthropic` SDK (Asaf, 2026-06-18).
-  Embeddings local (`all-MiniLM-L6-v2`). Non-LLM services (SerpAPI/Tavily/Firecrawl/ReactFirst) unchanged.
-- **Open questions:** OQ-0/1/3/4/5/6 resolved (OQ-5 moot — Policy 3 removed). **OQ-2** pins resolved at
-  Stage 1. **OQ-7** live keys (`ANTHROPIC_API_KEY` + SerpAPI/Tavily/Firecrawl/ReactFirst/Slack + Phase-2
-  mocked transports' keys) outstanding by design — only gates live smokes; all Phase-2 transports are mocked.
-- **Carry-overs:** PM is sole Python verifier in `.venv` (executer sandbox can't run Python); PM runs the
-  **full** `tests/` regression every stage. All Phase-2 external transports mocked → no new live-key blockers.
-- **Next action:** none on the backend — all 14 stages ✅, Phase 2 closed (2026-06-19). The deliverable
-  (`main.py` + `lead_store.py` + `rag_engine.py` + `crm_store.py` + `requirements.txt` + `angle_corpus.json`,
-  per `MANIFEST.txt`) is import-safe, graded-contract-stable (tool count 10, `answer_question` byte-stable,
-  `FALLBACK_MESSAGE` exact), and green at 684/1 skip/0 fail. Live smokes remain gated on OQ-7 keys by
-  design. (Frontend F2–F5 is a separate PM lane under `frontend/`.)
+> **Refreshed 2026-06-20 by the PM truth-sync audit.** The earlier "PROJECT COMPLETE at Phase 2 / baseline
+> 684" framing was stale by three phases + a deployment. This section now reflects **committed `main`
+> reality** and flags **in-flight concurrent work**. Phase 4 has its own tracker (`Plans/data_plan.md`,
+> D0–D4); Phase 5 has its own (`Plans/backend_connection_plan.md`, C0–C6).
+
+- **Current status:** Backend **feature-complete, deployed, connected, and persistent on real data.**
+  Phase 1 Stages 0–9 ✅; Phase 2 Stages 10–14 ✅ (SLED L1/L5/L6 re-skin); **Phase 3** I0–I4 ✅ (FastAPI
+  FE↔BE; **I5 deferred**, OQ-7-gated); **Phase 4** D0–D4 ✅ (MongoDB persistence via `db.py` — see
+  `Plans/data_plan.md`); **Phase 5** connection plan **C0–C2 ✅**; C3/C4/C5 plan-only.
+- **Committed baseline (on `origin/main` = PR #3 `ab26709`; PM-verified this session, 2026-06-20):**
+  `tests/` = **777 passed, 5 skipped (S10 + 4 live-gated), 0 failed** (`MONGO_URI` unset, mongomock path).
+  This is lead-detail + C1/C2 (`9e3302e`).
+- **⚠️ In-flight CONCURRENT work — uncommitted, NOT on `main`, NOT verified by this session:** two other
+  PM sessions left work in the shared tree — **C6** (ICP durable substrate / `icp_documents`; session-A
+  16:38 handback claims **783/6**) and **C4** (live ICP-driven discovery: untracked `pipeline_runner.py` +
+  `/api/pipeline/discover` routes). They are **interleaved in `api_server.py` / `tests/conftest.py` /
+  `tests/test_api.py`**, so a clean per-stage commit needs coordination (see PM_LOG 2026-06-20 16:38 +
+  the audit). Do **not** treat 783 as the baseline until it is committed and re-verified.
+- **Live stack:** FE Vercel `crm-asaf6.vercel.app` ↔ BE Railway `backend-production-77e4.up.railway.app`
+  ↔ Atlas `gtm_db` (9 real athleisure leads; `icp_documents` empty until a deploy seeds it). Open:
+  Vercel Deployment Protection ON (URL needs login); ANTHROPIC/FIRECRAWL **not** set on Railway (gates
+  live search from the app); rotate the leaked ANTHROPIC/FIRECRAWL keys.
+- **Graded contract (unchanged):** tool count **10** (verified), `answer_question` byte-stable,
+  `FALLBACK_MESSAGE` exact, ENV4 import-safe. Catalog = **30 data rows** (12 synthetic + 18 real
+  athleisure; **1 Blacklisted**), populated 2026-06-20 for live discovery.
+- **LLM provider:** **Claude** (Opus 4.8 / Sonnet 4.6 / Haiku 4.5) via the `anthropic` SDK. Embeddings
+  local (`all-MiniLM-L6-v2`). Non-LLM services (SerpAPI/Tavily/Firecrawl/ReactFirst) unchanged.
+- **Open questions:** OQ-0–OQ-6 resolved. **OQ-7** live keys outstanding by design — gates live smokes;
+  ANTHROPIC + FIRECRAWL provided to Asaf's local `.env` (first live run done 2026-06-20), not on Railway.
+- **Next action:** Asaf to coordinate committing the interleaved C6/C4 work, then pick from the standing
+  menu (C3 write endpoints / finish C4 live search / deploy-security hygiene). Frontend is a separate lane.

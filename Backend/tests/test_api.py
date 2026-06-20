@@ -999,12 +999,16 @@ class TestINTG8EnrollmentsAndMockSplit:
         assert len(enrollments) == len(cohorts)
 
     def test_fe_mock_endpoints_have_no_backend_route(self):
-        """getReachSeries/getAgentEvents/runDiscovery/getSwarmStages stay FE-mock → 404 here."""
+        """getReachSeries/getAgentEvents/getSwarmStages stay FE-mock → 404 here.
+
+        (runDiscovery is now backed by POST /api/pipeline/discover — connection-plan C4 —
+        so /api/pipeline/discover is intentionally NOT in this no-route list anymore.)
+        """
         from fastapi.testclient import TestClient
         import api_server
         with TestClient(api_server.app) as client:
             for path in ("/api/outreach/reach", "/api/outreach/agent-events",
-                         "/api/pipeline/discover", "/api/pipeline/swarm"):
+                         "/api/pipeline/swarm"):
                 assert client.get(path).status_code == 404, (
                     f"{path} should NOT exist as a backend route in v1"
                 )
@@ -1259,3 +1263,122 @@ class TestCONNDbTruthful:
         raw = json.dumps(TestClient(api_server.app).get("/api/leads/stats").json())
         assert "corporate_access_key" not in raw and "SECRETKEY" not in raw
         assert "contact_ids" not in raw
+
+
+# ---------------------------------------------------------------------------
+# CONN9 / CONN10 — ICP durable substrate (connection-plan C6)
+# /api/icp + /api/icp/suggestions served from the persisted `icp_documents`
+# collection (seed-if-empty), not the in-memory SEED_ICP constant.
+# MONGO_URI is unset in the offline test contract → mongomock path.
+# ---------------------------------------------------------------------------
+
+_REQUIRES_MONGO = pytest.mark.skipif(
+    not os.environ.get("MONGO_URI"),
+    reason="requires a real MongoDB (set MONGO_URI to run these tests)",
+)
+
+
+class TestCONN9IcpDurableSubstrate:
+    """CONN9: /api/icp is served from `icp_documents`, seed-if-empty, editable,
+    with a resilient SEED_ICP fallback. Offline (mongomock) path."""
+
+    def test_conn9_lifespan_seeds_icp_collection(self):
+        """Lifespan seeds exactly one ICP doc and /api/icp serves it (200, shaped)."""
+        from fastapi.testclient import TestClient
+        import api_server
+        import api_seed
+
+        with TestClient(api_server.app) as client:  # `with` runs lifespan → seed
+            assert api_seed.get_icp_collection().count_documents({}) == 1
+            body = client.get("/api/icp").json()
+            assert body["title"] == "Athleisure"        # vertical → title
+            assert isinstance(body["keywords"], list) and body["keywords"]
+            assert "anchorCompanies" in body and "qualificationCriteria" in body
+
+    def test_conn9_seed_is_idempotent(self):
+        """A second seed_icp_if_empty() never duplicates or clobbers the doc."""
+        import api_seed
+
+        api_seed.seed_icp_if_empty()
+        api_seed.seed_icp_if_empty()
+        assert api_seed.get_icp_collection().count_documents({}) == 1
+
+    def test_conn9_served_from_db_not_constant(self):
+        """Editing the stored doc changes /api/icp — proof it reads the DB, not SEED_ICP."""
+        from fastapi.testclient import TestClient
+        import api_server
+        import api_seed
+
+        with TestClient(api_server.app) as client:
+            api_seed.get_icp_collection().update_one({}, {"$set": {"vertical": "Skincare"}})
+            assert client.get("/api/icp").json()["title"] == "Skincare"
+        # SEED_ICP constant is untouched by the edit (we copied on seed).
+        assert api_seed.SEED_ICP["vertical"] == "Athleisure"
+
+    def test_conn9_suggestions_from_persisted_doc(self):
+        """/api/icp/suggestions reflects the persisted doc's want_signals, not the constant."""
+        from fastapi.testclient import TestClient
+        import api_server
+        import api_seed
+
+        with TestClient(api_server.app) as client:
+            api_seed.get_icp_collection().update_one(
+                {}, {"$set": {"want_signals": ["edited signal"]}}
+            )
+            assert client.get("/api/icp/suggestions").json() == ["edited signal"]
+
+    def test_conn9_empty_collection_falls_back_to_seed(self):
+        """No lifespan → empty collection → /api/icp falls back to SEED_ICP (200, never empty)."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        # Bare TestClient (no `with`) does not run lifespan → no seed.
+        resp = TestClient(api_server.app).get("/api/icp")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Athleisure"   # resilient SEED_ICP fallback
+
+    def test_conn9_no_secret_or_internal_keys_in_body(self):
+        """The ICP body never carries corporate_access_key or the internal _id/icp_id."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            raw = json.dumps(client.get("/api/icp").json())
+        assert "corporate_access_key" not in raw
+        assert "icp_id" not in raw and '"_id"' not in raw
+
+
+@_REQUIRES_MONGO
+class TestCONN10IcpRestartDurability:
+    """CONN10 (live, skipif no MONGO_URI): an edited ICP doc survives a simulated
+    restart (singleton reset + reconnect); re-seeding is idempotent. Self-cleaning."""
+
+    def test_conn10_icp_persists_across_restart(self):
+        import db
+        import api_seed
+
+        try:
+            api_seed.get_icp_collection().drop()      # fresh start
+            api_seed._icp_collection = None
+            api_seed.seed_icp_if_empty()
+            api_seed.get_icp_collection().update_one(
+                {}, {"$set": {"vertical": "RestartProof"}}
+            )
+
+            # --- simulate a process restart ---
+            db._client = None
+            api_seed._icp_collection = None
+
+            # reconnect: the edit is still there (real persistence)
+            doc = api_seed.get_icp_document()
+            assert doc["vertical"] == "RestartProof"
+
+            # re-seed is idempotent — does not clobber or duplicate
+            api_seed.seed_icp_if_empty()
+            assert api_seed.get_icp_collection().count_documents({}) == 1
+            assert api_seed.get_icp_document()["vertical"] == "RestartProof"
+        finally:
+            try:
+                api_seed.get_icp_collection().drop()
+            except Exception:
+                pass

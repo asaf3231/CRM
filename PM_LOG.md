@@ -669,3 +669,80 @@ Deployment Protection off for a public URL + rotate ANTHROPIC/FIRECRAWL keys).
 Watch out for / open: (1) branch is named `feat/lead-detail-endpoint` but now also carries C1/C2 — if a
 clean per-feature PR is wanted, split before opening. (2) NOT pushed — local only. (3) NEVER run the full
 suite with `MONGO_URI` set (tests assume a fresh store per test). (4) Frontend is a separate PM lane.
+
+## 2026-06-20 16:38 — [BACKEND] SESSION END / HANDOFF (C6 — ICP durable substrate) — concurrent w/ 16:23 block
+Append-only honesty: this is the END for the **16:18 START (session A = me)**. A **concurrent PM (session B,
+16:23 START / 16:25 END above)** ran in parallel — it (correctly) read A as idle, re-verified 777/5, and on
+Asaf's "commit the green tree" committed **C1/C2 → `9e3302e`** + **PM_LOG → `d54bbb1`** and pushed the branch.
+Meanwhile A did the actual work below. No conflict — verified HEAD is clean C1/C2 (zero partial-C6); my C6 is
+the unstaged diff on top; ironically C6 IS session B's listed next-option "(c) ICP persistence."
+Did: Asaf picked **ICP persistence**, scope **read-only durable substrate**. Designed → plan-approved →
+implemented + PM-verified as connection-plan stage **C6**. `/api/icp` + `/api/icp/suggestions` now serve from a
+persisted **`icp_documents`** collection (`api_seed.get_icp_collection`/`seed_icp_if_empty`/`get_icp_document`),
+not the in-memory `SEED_ICP`. **Decision:** ICP seed-if-empty is **independent of `SEED_DEMO`** (baseline config,
+not demo data — Railway runs `SEED_DEMO=0`); resilient `SEED_ICP` fallback (never 500/empty). No Policy-4 gate
+(ICP has no private fields); **no graded contract touched** → no reviewer gate (like C0/C1/C2). FE contract
+byte-identical.
+Verified numbers (PM, `.venv`, `MONGO_URI` unset): offline full suite **783 passed / 6 skipped / 0 failed**
+(777 baseline + 6 new `TestCONN9`; 1 new live `TestCONN10` skipped-gated). ENV4 from `/tmp` holds for all 7
+modules incl. `api_seed._icp_collection` (lazy `None`). CONN10 live restart-durability NOT run vs Atlas (avoid
+touching prod `icp_documents`) — `skipif`-gated like DB7/S10.
+Status now: ✅ C6 complete & offline-verified, **uncommitted** (7-file unstaged diff on top of `9e3302e`/`d54bbb1`).
+Connection plan C0–C2 + **C6** ✅; C3 (write endpoints) / C4 (live pipeline) / C5 (FE wiring) still plan-only.
+Spine updated: `QA_checklist.md` §13 (CONN9/CONN10), `Plans/backend_connection_plan.md` (C6 stage+tracker+legend),
+`NOTES.md` (handback).
+Next PM should: offer to commit C6 as its own commit on `feat/lead-detail-endpoint` (mirroring B's `9e3302e`);
+do NOT push to `main` (denied → PR). Then per Asaf: optional live CONN10 vs throwaway Docker Mongo; next Railway
+deploy's first boot seeds `icp_documents` into Atlas (currently empty) → `/api/icp` serves from Atlas. Standing
+items: live search/analyze from app (I5/C4), Vercel Deployment Protection, key rotation.
+Watch out for / open: (1) **CONCURRENT PM sessions ran this afternoon** — confirm branch/tree state with Asaf
+before assuming. (2) NEVER run the full suite with `MONGO_URI` set. (3) C6 is in the additive API layer — graded
+engine untouched. (4) Frontend is a separate PM lane.
+
+## 2026-06-20 16:42 — [BACKEND] ADDENDUM (cross-lane: C4 PM is live; 1 suite failure is THEIRS)
+Asaf surfaced the **concurrent PM's plan = C4 (live ICP-driven discovery)**. It's coordinated, not colliding:
+its sole cross-lane dependency is **`api_seed.get_icp_document()`** — exactly the seam my C6 delivers — and it
+explicitly does NOT touch `/api/icp*`/`SEED_ICP`/`seed_icp_if_empty`/`icp_documents`. Their core is a NEW file
+`pipeline_runner.py` + additive `api_server.py` routes; `conftest.py` now carries BOTH resets
+(`api_seed._icp_collection` mine + `pipeline_runner._jobs_collection` theirs), merged clean.
+**Re-verified in the combined tree (`.venv`, `MONGO_URI` unset):** my C6 `CONN9` 6 passed / `CONN10` 1 skip-gated;
+full suite **782 passed, 1 FAILED, 6 skipped**. The 1 failure = `TestINTG8...test_fe_mock_endpoints_have_no_backend_route`
+— it asserts `/api/pipeline/discover` 404s, but the C4 PM just added `@app.post("/api/pipeline/discover")` (405 on
+GET now) → **the C4 PM owns INTG8's reconciliation** (their route, their QA §13 update per their plan). I did NOT
+touch it (cross-lane). **C6 is green on its own.**
+Commit caution: I did NOT commit C6 — the shared files (`api_server.py`, `conftest.py`) are entangled with the C4
+PM's in-flight uncommitted edits and the suite is RED from their INTG8; committing now would capture a red tree +
+their half-work. Commit C6 only once the lanes coordinate (C4 lands + fixes INTG8, or a clean per-file split).
+**DECISION (Asaf, 16:43): HOLD — leave C6 uncommitted; let the C4 PM land their work + the INTG8 fix first, then
+commit both lanes together.** C6 is done + green-on-its-own (CONN9 6/6; CONN10 live-gated); the only red is C4's
+INTG8. I am NOT committing and NOT touching the shared tree further. Next commit (whoever lands it) should include
+my C6 unstaged files: `Backend/api_seed.py`, `Backend/api_server.py` (ICP routes + lifespan), `Backend/tests/conftest.py`
+(`_icp_collection` reset), `Backend/tests/test_api.py` (`TestCONN9`/`TestCONN10`), `NOTES.md`, `QA_checklist.md`,
+`Plans/backend_connection_plan.md` — alongside the C4 work, once the suite is green again.
+
+## 2026-06-20 17:00 — [BACKEND] SESSION END / HANDOFF (C4 landed + INTG8 fixed + COMBINED C4/C6 commit)
+Did (C4 PM): Built **C4 — live, ICP-driven discovery engine** (connection-plan). New `Backend/pipeline_runner.py`
+(deterministic real-tool chain, NOT the flaky 15-call loop) reads the persisted ICP via the C6 seam
+`api_seed.get_icp_document()` → composes the seed from `vertical`+`want_signals` → real
+`generate_search_queries`/`execute_3way_fanout`/`extract_and_score_pool`/`analyze_company_chunk` → graded
+`evaluate_icp_tags` gate (untouched, ICPB5) → `icp_tags`/`avoid_signals` overlay → catalog matches persist
+(Policy 1), net-new show-only. Async `POST`/`GET /api/pipeline/discover` (2–5 min runs) gated by
+`ENABLE_LIVE` + `DISCOVERY_TOKEN` + single-job lock; job state in `pipeline_jobs`. **Fixed the INTG8 failure
+the C6 PM flagged** (`test_fe_mock_endpoints_have_no_backend_route` — dropped `/api/pipeline/discover` from the
+no-route list since `runDiscovery` is now backed). +13 `test_pipeline.py` (CONN7/11/12).
+**Verified (PM, `.venv`, `MONGO_URI` unset):** full suite **796 passed / 6 skipped / 0 failed** — GREEN (the
+C6 PM's lone red INTG8 is fixed). `main.py` untouched → tool count 10, `answer_question`, `FALLBACK_MESSAGE`
+byte-stable; ENV4 from `/tmp` holds incl. `pipeline_runner._jobs_collection`. Deployed the code (route live →
+`POST` 403 until enabled).
+**Per Asaf's 16:43 HOLD decision** (commit both lanes together once green), Asaf then issued `create-pr` on
+`feat/lead-detail-endpoint` → I committed the **combined C4 + C6 + spine** tree and pushed.
+Status now: ✅ C4 code complete + offline-verified + committed/pushed (combined with C6). connection-plan
+**C0–C2 + C6 ✅; C4 🔄 (code done, live pending keys)**; C3/C5 plan-only.
+Next PM should: (1) **live-verify C4** once Asaf sets the 4 Railway vars (`ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`,
+`ENABLE_LIVE=1`, `DISCOVERY_TOKEN`) — POST `/api/pipeline/discover` + poll → real leads in Atlas; (2) **C5 / FE
+wiring** (`/search`+`/swarm` → the endpoint; FE lane, Asaf's go-ahead pending); (3) open the PR (gh not authed
+in-session → Asaf opens via the compare URL).
+Watch out for / open: (1) `gh` NOT authenticated → I can push but cannot `gh pr create`; PR opened via URL by Asaf.
+(2) Combined commit spans two PM lanes (C4 mine + C6 the other PM's) per Asaf's explicit 16:43 decision — branch
+`feat/lead-detail-endpoint` now also carries C1/C2 + lead-detail + C4 + C6. (3) NEVER run the suite with
+`MONGO_URI` set. (4) Live C4 enablement puts real keys + paid runs on the public URL (token-gated).
