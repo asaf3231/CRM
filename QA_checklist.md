@@ -383,6 +383,26 @@ Driven by `FakeReasoningClient`.
   the real records).
 - `CONN4` **No leak on stats:** the `/api/leads/stats` body never carries `corporate_access_key` or
   `contact_ids` (it emits only aggregate counts).
+- `CONN9` **ICP durable substrate (C6):** `/api/icp` + `/api/icp/suggestions` are served from a persisted
+  `icp_documents` collection (`api_seed.get_icp_document`), not the in-memory `SEED_ICP` constant. The doc is
+  **seed-if-empty** on lifespan startup, **independent of `SEED_DEMO`** (the ICP is baseline config, not demo
+  data — Railway sets `SEED_DEMO=0`); editing the stored doc changes the response; an empty collection falls
+  back to `SEED_ICP` so the endpoint never 500s/returns empty; the offline mongomock path seeds at boot so FE
+  dev is unchanged; the body carries no `corporate_access_key`/`_id`/`icp_id`. Import-safety preserved
+  (collection accessed lazily; seed only on ASGI lifespan; `_icp_collection` reset in `conftest.py`).
+- `CONN10` **ICP restart durability (live, `skipif` no `MONGO_URI`, like `DB7`):** an edited ICP doc survives
+  a simulated restart (reset `db`/store singletons → reconnect → the edit persists); `seed_icp_if_empty()` is
+  idempotent (no duplicate/clobber). Self-cleaning (drops `icp_documents` in a `finally`).
+- `CONN7` **Live discovery job lifecycle (C4):** `pipeline_runner.run_discovery` chains the real graded tools
+  (mocked at the network boundary) → a job moves through stages to `done`; catalog matches that clear the ICP
+  gate (`>= ICP_TAG_THRESHOLD` live signals) **persist** to `crm_store`; net-new brands are reported but **NOT
+  saved** (Policy 1); below-threshold brands don't qualify; a tool error is recorded on the job, never raised.
+- `CONN11` **ICP wiring (C4):** the search seed is composed from `api_seed.get_icp_document()`
+  `vertical`+`want_signals` (override wins if supplied); `avoid_signals` drop matching candidates; `icp_fit` =
+  `|crawl signals ∩ icp_tags|`. The graded `evaluate_icp_tags`/`_ICP_TAGS`/threshold are UNCHANGED (ICPB5).
+- `CONN12` **Discovery endpoint gating (C4):** `POST /api/pipeline/discover` → 403 without `ENABLE_LIVE`, 401
+  on a missing/invalid `DISCOVERY_TOKEN`, 409 while a run holds the single-job lock; 404 on an unknown job id;
+  no `corporate_access_key` in any job body. Import-safety preserved (`pipeline_runner` lazy; ENV4).
 
 > **Live data note (2026-06-20):** `brands_catalog.csv` was extended with a real athleisure brand universe
 > (Alo Yoga, Vuori, Fabletics, … — 18 rows alongside the 12 synthetic) so live-crawled brands match the

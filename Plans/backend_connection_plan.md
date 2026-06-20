@@ -51,7 +51,7 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 ---
 
 ## Status legend
-⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0–C2 executed (Asaf, 2026-06-20); C3–C5 plan-only.**
+⬜ Proposed (not started) · 🔄 In progress · ✅ Complete — **C0–C2 + C6 executed (Asaf, 2026-06-20); C3–C5 plan-only.**
 
 ## Stage tracker (proposed)
 
@@ -61,8 +61,9 @@ with the demo seed, surface DB health, and (optionally, key-gated) let a real pi
 | C1 | DB-aware `/api/health` + connection lifecycle | `CONN2` | ✅ Complete |
 | C2 | Read endpoints serve real persisted data (computed stats) | `CONN3`–`CONN4` | ✅ Complete |
 | C3 | Write endpoints (stage / enrollment) — persist FE mutations | `CONN5`–`CONN6` | ⬜ Proposed |
-| C4 | Live-pipeline ingest (`ENABLE_LIVE`, OQ-7-gated) — merges I5 | `CONN7` | ⬜ Proposed |
+| C4 | Live-pipeline ingest (`ENABLE_LIVE`, OQ-7-gated) — merges I5 | `CONN7`, `CONN11`–`CONN12` | 🔄 Code complete (offline-green); live pending keys |
 | C5 | FE wiring + cross-restart Preview proof | `CONN8` | ⬜ Proposed |
+| C6 | ICP durable substrate (read-only persistence) — decision #2, read half | `CONN9`–`CONN10` | ✅ Complete |
 
 ---
 
@@ -124,6 +125,17 @@ emits `corporate_access_key`; invalid payloads return structured 4xx, never a 50
 (`/api/pipeline/discover|swarm`). **Blocked on OQ-7 keys** — keep behind the flag; offline default unchanged.
 **DoD:** `CONN7` with keys, a discovery run persists new leads queryable via `GET /api/leads`; without keys
 the route is disabled and the rest of the API is unaffected.
+**Status:** 🔄 Code complete + offline-verified (live pending Railway keys) — PM-implemented 2026-06-20.
+**Deviation (Asaf-approved):** built as a **deterministic real-tool runner** (`Backend/pipeline_runner.py`),
+NOT the 15-call `answer_question` loop — the loop qualifies inconsistently (feeds the ICP check thin strings;
+NOTES 2026-06-20). The runner chains the same graded tools and is **ICP-driven**: reads the persisted ICP via
+`api_seed.get_icp_document()` (the C6 seam), composes the search seed from `vertical`+`want_signals`, keeps the
+graded `evaluate_icp_tags` gate untouched, and applies an `icp_tags`/`avoid_signals` overlay. Async job
+(`POST`/`GET /api/pipeline/discover`, 2–5 min runs) gated by `ENABLE_LIVE` + `DISCOVERY_TOKEN` + a single-job
+lock; job state in a `pipeline_jobs` collection. Catalog matches persist (Policy 1); net-new = show-only.
+Offline suite **796 passed / 5+ skipped / 0 failed** (+13 `test_pipeline.py`); `main.py` untouched (graded
+contracts byte-stable); ENV4 holds. **Live verification (deployed POST/poll) pending the 4 Railway vars.**
+Files: `Backend/pipeline_runner.py`, `Backend/api_server.py`, `Backend/tests/test_pipeline.py`, `conftest.py`.
 
 ## Stage C5 — FE wiring + cross-restart Preview proof
 **Goal:** prove end-to-end persistence in the running app.
@@ -132,6 +144,27 @@ the route is disabled and the rest of the API is unaffected.
 backend** → the change is **still there** (the headline proof that persistence is real).
 **DoD:** `CONN8` a UI mutation survives a backend restart, shown live; `tsc --noEmit` clean; kill-Mongo →
 graceful UI error (not a crash).
+
+## Stage C6 — ICP durable substrate (read-only persistence)
+**Goal:** make `/api/icp` serve a durable, editable ICP document from the DB instead of the in-memory
+`SEED_ICP` constant — the read half of decision #2 (Asaf chose read-only; write endpoints stay deferred at C3).
+**Inputs:** `api_seed.SEED_ICP`, `api_adapters.icp_doc_to_ui`, `db.get_database()`, the `crm_store` collection-
+getter pattern.
+**Approach (executed):** new `icp_documents` collection via a lazy getter `api_seed.get_icp_collection()`
+(mirrors `crm_store.get_crm_collection()`; real-Mongo-only unique index on `icp_id`, mongomock-guarded).
+`api_seed.seed_icp_if_empty()` (called from the ASGI lifespan alongside `seed_demo()`) inserts the SEED_ICP doc
+**only when the collection is empty** and is **deliberately NOT gated on `SEED_DEMO`** (the ICP is baseline
+config; Railway runs `SEED_DEMO=0`). `api_seed.get_icp_document()` reads the persisted doc (strips `_id`/`icp_id`)
+and **falls back to a copy of `SEED_ICP`** if the collection is empty (never 500/empty). `GET /api/icp` and
+`/api/icp/suggestions` now read `get_icp_document()`. No Policy-4 gate (ICP has no private contact fields); no
+graded contract touched (tool count 10, `answer_question`, `FALLBACK_MESSAGE` byte-stable); FE contract unchanged.
+**DoD:** `CONN9` (offline: served-from-DB, seed-if-empty, edit-reflected, SEED_ICP fallback, no secret/internal
+keys) + `CONN10` (live restart durability + idempotent re-seed).
+**Status:** ✅ Complete — PM-implemented + verified 2026-06-20. Offline full suite **783 passed / 6 skipped / 0
+failed** (`MONGO_URI` unset; 777 + 6 CONN9; CONN10 live-gated skip). ENV4 holds for all 7 modules incl.
+`api_seed._icp_collection` (lazy `None`). No reviewer gate (no graded contract — same as C0/C1/C2). **Deploy
+note:** the first Railway boot after this ships seeds `icp_documents` into Atlas (currently empty) →
+`/api/icp` then serves from Atlas. Files: `api_seed.py`, `api_server.py`, `tests/test_api.py`, `tests/conftest.py`.
 
 ---
 

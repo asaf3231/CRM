@@ -20,11 +20,16 @@ Author: Asaf (ReactFirst AI)
 
 import contextlib
 import os
-from typing import List
+import threading
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Single-job lock for live discovery (one run at a time). Constructing a Lock is
+# side-effect-free, so this is import-safe (ENV4).
+_DISCOVERY_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -36,13 +41,16 @@ from pydantic import BaseModel
 async def lifespan(app: FastAPI):
     """ASGI lifespan context manager.
 
-    On startup: lazily imports api_seed and calls seed_demo() to populate
-    the crm_store with the 16 deterministic example leads.
+    On startup: lazily imports api_seed and (1) calls seed_demo() to populate
+    the crm_store with the 16 deterministic example leads (seed-if-empty), and
+    (2) calls seed_icp_if_empty() to persist the ICP document into the durable
+    `icp_documents` collection (connection-plan C6 / CONN9).
     The import happens HERE (inside lifespan body), never at module top-level,
     preserving the import-safety contract (INTG1 / ENV4).
     """
     import api_seed  # lazy — preserves import-safety
     api_seed.seed_demo()
+    api_seed.seed_icp_if_empty()
 
     yield  # startup complete — serve requests
     # (no teardown needed)
@@ -206,27 +214,30 @@ async def get_lead_detail(lead_id: str) -> dict:
 
 @app.get("/api/icp")
 async def get_icp() -> dict:
-    """INTG6: GET /api/icp → IcpDocument.
+    """INTG6 / CONN9: GET /api/icp → IcpDocument.
 
-    Returns the seed ICP document (offline — no live build_icp_document call).
-    api_seed and api_adapters imported lazily.
+    Serves the ICP from the durable `icp_documents` collection
+    (api_seed.get_icp_document) — not the in-memory SEED_ICP constant — so the
+    response reflects the persisted (and editable) doc. Falls back to SEED_ICP
+    if the collection is empty (never 500/empty). api_seed and api_adapters
+    imported lazily (import-safety / INTG1).
     """
     import api_seed         # lazy
     import api_adapters     # lazy
 
-    return api_adapters.icp_doc_to_ui(api_seed.SEED_ICP)
+    return api_adapters.icp_doc_to_ui(api_seed.get_icp_document())
 
 
 @app.get("/api/icp/suggestions")
 async def get_icp_suggestions() -> list:
-    """INTG6: GET /api/icp/suggestions → list[str].
+    """INTG6 / CONN9: GET /api/icp/suggestions → list[str].
 
-    Returns the SEED_ICP want_signals list.
-    api_seed imported lazily.
+    Returns the want_signals from the persisted ICP document (not the static
+    SEED_ICP constant). api_seed imported lazily.
     """
     import api_seed  # lazy
 
-    return api_seed.SEED_ICP["want_signals"]
+    return api_seed.get_icp_document().get("want_signals", [])
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +310,78 @@ async def get_outreach_enrollments() -> list:
     return api_adapters.cohorts_to_enrollments(cohorts_ui)
 
 
-# NOTE — FE-mock-only in v1 (no backend route; the network tab stays real-data only):
-#   getReachSeries, getAgentEvents, runDiscovery, getSwarmStages
-# TODO I5: /api/outreach/reach, /api/outreach/agent-events, /api/pipeline/discover|swarm
+# ---------------------------------------------------------------------------
+# Routes — Stage C4: live, ICP-driven discovery (async job; connection-plan C4)
+# Gated by ENABLE_LIVE + a DISCOVERY_TOKEN header + a single-job lock. A run is
+# 2-5 min, so POST kicks off a background thread and returns a jobId; the FE polls
+# GET .../{jobId}. pipeline_runner + os are imported lazily (import-safety / ENV4).
+# ---------------------------------------------------------------------------
+
+class DiscoverRequest(BaseModel):
+    """Request body for POST /api/pipeline/discover (CONN7)."""
+    seed: Optional[str] = None
+
+
+def _live_enabled() -> bool:
+    return os.environ.get("ENABLE_LIVE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@app.post("/api/pipeline/discover")
+async def start_discovery(
+    body: DiscoverRequest,
+    x_discovery_token: Optional[str] = Header(default=None),
+) -> dict:
+    """CONN7: kick off a live discovery run; return {jobId, status:"running"} immediately.
+
+    403 if ENABLE_LIVE is not set; 401 on a missing/invalid DISCOVERY_TOKEN; 409 if a
+    run is already in progress (single-job lock). The actual run executes on a daemon
+    thread (pipeline_runner.run_discovery), writing progress to the pipeline_jobs doc.
+    """
+    if not _live_enabled():
+        raise HTTPException(status_code=403, detail="live discovery disabled (ENABLE_LIVE not set)")
+    expected = os.environ.get("DISCOVERY_TOKEN", "")
+    if not expected or x_discovery_token != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing discovery token")
+
+    import pipeline_runner  # lazy
+
+    if not _DISCOVERY_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a discovery run is already in progress")
+    try:
+        job_id = pipeline_runner.create_job(body.seed)
+    except Exception:
+        _DISCOVERY_LOCK.release()
+        raise
+
+    def _run() -> None:
+        try:
+            pipeline_runner.run_discovery(job_id, body.seed)
+        finally:
+            _DISCOVERY_LOCK.release()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"jobId": job_id, "status": "running"}
+
+
+@app.get("/api/pipeline/discover/{job_id}")
+async def discovery_status(job_id: str) -> dict:
+    """CONN7: poll a discovery job → {jobId, status, stage, discovered[], qualified[], saved[]}."""
+    import pipeline_runner  # lazy
+
+    job = pipeline_runner.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {
+        "jobId": job["job_id"],
+        "status": job.get("status"),
+        "stage": job.get("stage"),
+        "seed": job.get("seed", ""),
+        "discovered": job.get("discovered", []),
+        "qualified": job.get("qualified", []),
+        "saved": job.get("saved", []),
+        "error": job.get("error"),
+    }
+
+
+# NOTE — still FE-mock-only (no backend route): getReachSeries, getAgentEvents, getSwarmStages.
+#   runDiscovery is now backed by POST/GET /api/pipeline/discover above.

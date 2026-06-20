@@ -366,3 +366,81 @@ def seed_demo() -> None:
 
     for record in _SEED_RECORDS:
         crm_store.upsert_lead(record)
+
+
+# ---------------------------------------------------------------------------
+# ICP durable substrate (connection-plan C6 / CONN9–CONN10)
+# Persist the ICP document in an `icp_documents` collection so /api/icp serves
+# the durable workspace instead of the in-memory SEED_ICP constant — making the
+# ICP the third DB-backed read endpoint (after leads + computed stats).
+#
+# Governance: the ICP doc has NO private contact fields, so no Policy-4 auth
+# gate is involved, and no corporate_access_key is ever written or read here.
+#
+# Seed-if-empty is INTENTIONALLY INDEPENDENT of SEED_DEMO. The ICP doc is
+# baseline configuration, not disposable demo data — Railway sets SEED_DEMO=0 to
+# retire the demo leads, but the ICP must still seed there or /api/icp would
+# return empty. It seeds only when the collection is empty and never clobbers an
+# existing (possibly edited) doc.
+#
+# Import-safety (ENV4): the collection is obtained lazily inside each function
+# via db.get_database(); nothing connects at import time. `_icp_collection` is
+# the lazy singleton (reset in tests/conftest.py).
+# ---------------------------------------------------------------------------
+
+_ICP_DOC_ID = "active"   # stable key for the single active ICP doc
+_icp_collection = None   # lazy singleton — built on first use, not at import
+
+
+def get_icp_collection():
+    """Return the `icp_documents` collection from db.get_database().
+
+    Lazy singleton mirroring crm_store.get_crm_collection(): built on first
+    call, never at import. A real-Mongo-only unique index on `icp_id` keeps the
+    seed idempotent; create_index is guarded so the mongomock path stays
+    side-effect-identical to having no index (ENV4 / DB6 pattern).
+    """
+    global _icp_collection
+    if _icp_collection is None:
+        import db  # lazy — preserves import-safety (ENV4)
+
+        _icp_collection = db.get_database()["icp_documents"]
+        if db.using_real_mongo():
+            try:
+                _icp_collection.create_index("icp_id", unique=True)
+            except Exception:
+                pass  # index is a real-Mongo safety net; never crash the getter
+    return _icp_collection
+
+
+def seed_icp_if_empty() -> None:
+    """Seed SEED_ICP into `icp_documents` when the collection is empty.
+
+    Called from the ASGI lifespan (never at import). Seed-if-empty and
+    idempotent: if a doc already exists it is left untouched (never clobbered).
+    Deliberately NOT gated on SEED_DEMO — see the section header.
+    """
+    collection = get_icp_collection()
+    if collection.count_documents({}) > 0:
+        return  # already seeded — never overwrite an edited ICP
+    doc = dict(SEED_ICP)          # shallow copy so the module constant is untouched
+    doc["icp_id"] = _ICP_DOC_ID
+    collection.insert_one(doc)
+
+
+def get_icp_document() -> dict:
+    """Return the persisted ICP document (SEED_ICP-shaped), or SEED_ICP as fallback.
+
+    Reads the single active doc from `icp_documents`, strips Mongo's `_id` and the
+    internal `icp_id`, and returns the SEED_ICP-shaped dict that icp_doc_to_ui
+    expects. If the collection is empty (e.g. a request before lifespan seeding),
+    falls back to a copy of the in-memory SEED_ICP so /api/icp never 500s or
+    returns empty.
+    """
+    try:
+        doc = get_icp_collection().find_one({})
+    except Exception:
+        doc = None
+    if not doc:
+        return dict(SEED_ICP)  # resilient fallback — never empty/500
+    return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}

@@ -1619,3 +1619,72 @@ deployed backend has no live-pipeline route and **no ANTHROPIC/FIRECRAWL keys on
 Railway + a background discovery endpoint + FE wiring). (c) Brands outside the catalog still won't persist
 (Policy 1) — same fork, by design.
 **Source:** PM `.venv` runs + live `railway`/`curl`/`pymongo` against Atlas, this session.
+
+---
+
+## 2026-06-20 — C6: ICP durable substrate (read-only persistence)
+**Type:** Decision + Verified fact (handback)
+**Context:** `/api/icp` was the last seed-served endpoint — it returned the in-memory `api_seed.SEED_ICP`
+constant. Asaf picked "ICP persistence," and from the scope fork chose **read-only durable substrate** (not
+the `PUT /api/icp` write endpoint, and not the live `build_icp_document` regen — those stay deferred at the
+connection plan's C3 / C4). This is the read half of connection-plan **decision #2**, tracked as new stage **C6**.
+**What landed (all PM-verified):**
+1. New **`icp_documents`** collection via a lazy getter `api_seed.get_icp_collection()` mirroring
+   `crm_store.get_crm_collection()` (real-Mongo-only unique index on `icp_id`, mongomock-guarded; built on
+   first use, never at import).
+2. `api_seed.seed_icp_if_empty()` (called from the ASGI lifespan next to `seed_demo()`) inserts the SEED_ICP
+   doc **only when the collection is empty**. **Key decision: NOT gated on `SEED_DEMO`** — the ICP doc is
+   baseline configuration, not disposable demo data, and Railway runs `SEED_DEMO=0` (set to retire the demo
+   leads); gating ICP seeding on it would leave production `/api/icp` empty. So ICP seeds unconditionally
+   (seed-if-empty), while the *demo leads* stay `SEED_DEMO`-gated.
+3. `api_seed.get_icp_document()` reads the persisted doc (strips `_id`/`icp_id`) and **falls back to a copy of
+   `SEED_ICP`** if the collection is empty → `/api/icp` never 500s/returns empty.
+4. `GET /api/icp` + `/api/icp/suggestions` now read `get_icp_document()` (was `SEED_ICP` directly), still
+   mapped through `icp_doc_to_ui` (camelCase, FE contract byte-identical).
+5. `tests/conftest.py` resets the new `api_seed._icp_collection` singleton (INTG2 pattern).
+**Governance:** ICP doc has **no private contact fields** → no Policy-4 auth gate involved; no
+`corporate_access_key`/`_id`/`icp_id` in the body (asserted, CONN9). **No graded contract touched** (tool count
+10, `answer_question`, `FALLBACK_MESSAGE` byte-stable); the change is confined to the additive Phase-3 API
+layer + `db.py` usage → **no reviewer gate** (same as C0/C1/C2).
+**Verified numbers (PM, `.venv`, `MONGO_URI` unset):** offline full suite **783 passed / 6 skipped / 0 failed**
+(777 baseline + 6 new `TestCONN9IcpDurableSubstrate`; the 1 new `TestCONN10IcpRestartDurability` is live-gated
+→ skipped offline). ENV4 from `/tmp` holds for all 7 modules incl. `api_seed._icp_collection` (lazy `None`).
+**Live (CONN10):** `skipif`-gated like `DB7`/`S10` — not run against Atlas this session (avoid touching prod
+`icp_documents`); run by PM against a throwaway Mongo when a live pass is wanted. **Deploy note:** first Railway
+boot after this ships seeds `icp_documents` into Atlas (currently empty) → `/api/icp` then serves from Atlas.
+**Files:** `Backend/api_seed.py`, `Backend/api_server.py`, `Backend/tests/test_api.py`, `Backend/tests/conftest.py`;
+spine: `Plans/backend_connection_plan.md` (C6), `QA_checklist.md` §13 (CONN9/CONN10).
+**Source:** PM `.venv` runs this session.
+
+---
+
+## 2026-06-20 — C4: live, ICP-driven discovery engine (the search/analyze you can trigger from the app)
+**Type:** Decision + Verified fact
+**Context:** Asaf wants to trigger search+analyze from the deployed app. The engine works (proven live) but had
+no HTTP trigger, no keys on Railway, and the `/search`/`/swarm` FE hooks were stubs. Built the backend half (C4).
+**Design (Asaf-approved decisions):**
+- **Deterministic real-tool runner, NOT the 15-call LLM loop.** New `Backend/pipeline_runner.py` chains the
+  real graded tools (`generate_search_queries → execute_3way_fanout → extract_and_score_pool → analyze_company_chunk`)
+  + the ICP gate, because the `answer_question` loop qualifies inconsistently (feeds `evaluate_icp_tags` thin
+  strings → 0 qualified; see the FIRST-LIVE-RUN entry). The runner reuses the exact tools, so it's the same
+  engine, just reliably orchestrated + instrumentable.
+- **ICP-driven (the ICP↔search seam):** reads the persisted ICP via **`api_seed.get_icp_document()`** (the
+  ICP PM's C6 getter; `SEED_ICP` fallback). `vertical`+`want_signals` → the search seed; `avoid_signals` drop +
+  `icp_fit = |crawl signals ∩ icp_tags|` overlay in the runner. The graded `evaluate_icp_tags`/`_ICP_TAGS`/
+  threshold are **untouched** (ICPB5) — qualification mirrors the gate on the crawl's own signal extraction.
+- **Async job** (a run is 2–5 min): `POST /api/pipeline/discover` launches a daemon thread + returns `{jobId}`;
+  `GET /api/pipeline/discover/{jobId}` polls `{status, stage, discovered, qualified, saved}`. Job state in a
+  `pipeline_jobs` Mongo collection (survives restart). **Gated:** `ENABLE_LIVE` + `DISCOVERY_TOKEN` header +
+  single-job lock (cost/abuse on the public URL).
+- **Persistence:** catalog matches persist via `crm_store.upsert_lead` (Policy 1); **net-new = show-only**.
+**Verified numbers (PM, `.venv`, `MONGO_URI` unset):** offline full suite **796 passed / 6 skipped / 0 failed**
+(+13 `test_pipeline.py`: CONN7/CONN11/CONN12). ENV4 from `/tmp` holds incl. `pipeline_runner._jobs_collection`
+(lazy `None`). `main.py` untouched → tool count 10, `answer_question`, `FALLBACK_MESSAGE` byte-stable.
+**Status:** code complete + offline-verified; **deployed** (route live, returns 403 until enabled). **Live
+verification pending** the 4 Railway vars (`ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ENABLE_LIVE=1`,
+`DISCOVERY_TOKEN`) — Asaf is setting them in the Railway dashboard. FE wiring (`/search`+`/swarm`) is the
+next step (deferred pending Asaf's go-ahead; FE lane).
+**Files:** `Backend/pipeline_runner.py` (new), `Backend/api_server.py` (2 routes + lock), `Backend/tests/test_pipeline.py`
+(new), `Backend/tests/conftest.py` (`_jobs_collection` reset); spine: `backend_connection_plan.md` (C4),
+`QA_checklist.md` §13 (CONN7/11/12).
+**Source:** PM `.venv` runs + live Railway deploy (route confirmed live: `POST` → 403) this session.
