@@ -81,13 +81,15 @@ export const api = {
     return getJSON<EnrollmentEvent[]>("/outreach/enrollments");
   },
 
-  // ─── Still FE-mock in v1 (no backend route yet — see PLAN.md Phase 3 / I5) ────
-
-  // No per-lead detail endpoint yet (needs /api/leads/{id} behind the Policy-4 gate).
-  // Reject so the drawer shows its honest "couldn't load" state instead of fabricated detail.
-  getLeadDetail(_id: string): Promise<LeadDetail> {
-    return Promise.reject(new Error("Lead detail source not connected"));
+  // ─── Lead detail (WIRED → backend) ──────────────────────────────────────────
+  // GET /api/leads/{id} → LeadDetail. Contacts come back empty (the API holds no
+  // corporate_access_key, so the Policy-4 gate is not satisfied); angle/brief are
+  // derived from the CRM record's own fields, not fabricated.
+  getLeadDetail(id: string): Promise<LeadDetail> {
+    return getJSON<LeadDetail>(`/leads/${encodeURIComponent(id)}`);
   },
+
+  // ─── Still FE-mock in v1 (no backend route yet — see PLAN.md Phase 3 / I5) ────
 
   // No live reach-by-stage source (needs the outreach execution log — not built). Empty, not faked.
   getReachSeries(): Promise<ReachPoint[]> {

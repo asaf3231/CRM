@@ -156,6 +156,86 @@ def crm_lead_to_ui(record: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# crm_lead_to_detail — CRM record → LeadDetail (camelCase) (lead-detail drawer)
+# ---------------------------------------------------------------------------
+
+# win_prob → angle Tier bands (deterministic; mirrors the 1..4 scale the FE
+# TierBadge renders). This is a DERIVED view of the record's own win_prob, NOT a
+# live match_solicitation_angle RAG result (which needs a crawl). Highest band wins.
+_ANGLE_TIER_BANDS = ((0.75, 1), (0.50, 2), (0.25, 3))
+
+
+def _derive_angle(win_prob: float, gov: str, tags: list, incidents: int, icp_count: int) -> dict:
+    """Derive a deterministic LeadAngle from the record's REAL signals.
+
+    Honest derivation — no invented external facts:
+      - tier is banded from the record's own win_prob,
+      - title is categorised from its GovBand (same spirit as gov_band/fit_grade),
+      - rationale quotes the actual ICP-tag / incident / win-prob numbers.
+    The true RAG-matched angle requires a live crawl + match_solicitation_angle run.
+
+    Returns a LeadAngle dict: {title, tier (1..4), rationale}.
+    """
+    tier = 4
+    for floor, t in _ANGLE_TIER_BANDS:
+        if win_prob >= floor:
+            tier = t
+            break
+
+    if gov == "Heavy Gov":
+        title = "Crisis-narrative brand-safety angle"
+    elif gov == "Light Gov":
+        title = "Reputation-watch angle"
+    else:
+        title = "Growth-performance angle"
+
+    tag_str = ", ".join(tags) if tags else "no ICP tags"
+    rationale = (
+        f"Derived from CRM signals — {icp_count} ICP tag(s) matched ({tag_str}); "
+        f"{incidents} historical social incident(s) ({gov}); "
+        f"win probability {round(win_prob * 100)}%. "
+        f"The RAG-matched angle is computed on a live crawl (match_solicitation_angle)."
+    )
+    return {"title": title, "tier": tier, "rationale": rationale}
+
+
+def crm_lead_to_detail(record: dict) -> dict:
+    """Convert a CRM lead record to the UI LeadDetail shape (camelCase).
+
+    LeadDetail extends Lead (see crm_lead_to_ui) with three more keys:
+        contacts, angle, brief
+
+    Contacts (Policy-4): private contact fields are reachable ONLY through the
+    lead_store auth gate with a valid corporate_access_key.  The API holds no
+    key, so `contacts` is returned EMPTY here — honest, and the Policy-4
+    chokepoint stays un-bypassed (contact_ids are never exposed either, since
+    this builds on crm_lead_to_ui which strips them).
+
+    angle / brief are deterministically derived from the record's own fields
+    (see _derive_angle) — no fabricated external facts.
+
+    Returns:
+        dict with the Lead keys + {contacts, angle, brief}.
+    """
+    base = crm_lead_to_ui(record)
+
+    win_prob = record.get("win_prob", 0.0)
+    icp_count = record.get("icp_count", 0)
+    incidents = record.get("historical_social_incidents", 0)
+
+    base["contacts"] = []  # Policy-4 gate not satisfied by the API → no private contacts revealed
+    base["angle"] = _derive_angle(win_prob, base["gov"], base["tags"], incidents, icp_count)
+    base["brief"] = (
+        f"{base['company']} ({base['domain']}) is a {base['kind']} lead at the "
+        f"'{base['stage']}' stage. {base['fit']} ICP fit "
+        f"({icp_count} tag(s): {', '.join(base['tags']) if base['tags'] else 'none'}). "
+        f"{base['gov']} — {incidents} historical social incident(s). "
+        f"Win probability {round(win_prob * 100)}%."
+    )
+    return base
+
+
+# ---------------------------------------------------------------------------
 # icp_doc_to_ui — SEED_ICP dict → IcpDocument (camelCase) (INTG6)
 # ---------------------------------------------------------------------------
 
