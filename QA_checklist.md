@@ -168,11 +168,9 @@ Driven by `FakeReasoningClient`.
 - `AG5` The `corporate_access_key` value never appears in any return value, log line, or error message.
 - `AG6` The gate is the single chokepoint: no code path reaches the `contacts` collection around it (grep + design check). `opt_out_status=True` contacts are suppressed from outbound.
 
-### Policy 3 — Premium Pricing / Risk Tier Loop  — **RESTORED** (Asaf, 2026-06-18)
-- `PR1` Eligibility: a `Tier 1` brand is flagged enterprise-SLA / premium-eligible; a non-`Tier 1` brand is not (driven by `Estimated_Ad_Spend_Tier` from the CSV, never invented — `POL1` cross-check).
-- `PR2` Multiplier trigger (exact, boundary-tested): `Historical_Social_Incidents > INCIDENT_PREMIUM_THRESHOLD (=5)` ⇒ the 15% premium applies; at `== 5` and `< 5` it does **not** (strictly greater than 5).
-- `PR3` Computed via `secured_calculator` only: `base * PREMIUM_MULTIPLIER (=1.15)` evaluates correctly through the AST walker; **no raw `eval`/`exec`** on the pricing path (`T8.*`/`G1` cross-check).
-- `PR4` (integration) A Q1-style query ("…ad spend tier is Tier 1… 6 incidents… premium estimation tier?") routes authenticate → `get_lead_data_collection` → `secured_calculator` and reports the premium tier; the tier/incident facts derive solely from the catalog/record (Policy 1).
+### Policy 3 — ~~Premium Pricing / Risk Tier Loop~~  — **REMOVED** (Asaf, 2026-06-19)
+- Premium pricing is no longer part of the system. `apply_premium`, the `PREMIUM_MULTIPLIER`/`INCIDENT_PREMIUM_THRESHOLD` constants, the `gtm_policies.txt` Policy 3 block, and the **`PR1`–`PR4` tests are retired** (deliberate deviation from the assignment spec, accepted by Asaf — see `CLAUDE.md` §5 Policy 3 and `NOTES.md`).
+- `secured_calculator` (tool 8) **stays** as a general AST-walled arithmetic tool (the calculator security rule is independent of premium pricing).
 
 ### Policy 5 — Output Suggestions Ceiling
 - `CL1` A run that could yield >3 angles emits **exactly 3** when no count is requested.
@@ -237,6 +235,148 @@ Driven by `FakeReasoningClient`.
 
 ---
 
+## §10. Phase 2 — SLED 6-layer parity (L1 ICP Builder + L5 mini-CRM + L6 Outreach)
+
+> Re-skin of the SLED 6-layer GTM engine onto our crisis-narrative / brand-safety domain (Asaf,
+> 2026-06-19). All external transports (grounded search, Apollo, Resend/email, PhantomBuster) are
+> **mocked with injectable clients**; live smokes stay SKIPPED without keys (OQ-7). Every existing
+> governance contract (auth gate, ≤3 ceiling, Policy-6 fallback, Tool Gateway) is preserved.
+
+### Layer 1 — ICP Builder (`build_icp_document`)  — Stage 10
+- `ICPB1` Returns the structured ICP shape: `{vertical, want_signals[], avoid_signals[], geo, size_band, icp_tags[], anchor_companies[]}` (types correct; JSON-serializable).
+- `ICPB2` Anchor/example leads are capped at `ICP_ANCHOR_COUNT` (=5); never more.
+- `ICPB3` Import-safety holds (`ENV4` re-proven post-edit; no client/model built at import).
+- `ICPB4` Anti-leakage (`G2`): no real catalog literals in the shipped tool or its prompt; anchors drawn at runtime, not hardcoded.
+- `ICPB5` Policy 2 unchanged: `evaluate_icp_tags` `_ICP_TAGS` vocabulary + the ≥3 gate are untouched; the ICP doc does not replace the qualification gate.
+- `ICPB6` Generalizes (`G5`-style): a second, different seed produces a correctly-shaped doc with no code change; under a mocked Claude client the shape is deterministic.
+
+### Layer 5a — mini-CRM lead workspace (`crm_store.py`)  — Stage 11
+- `CRM1` Lazy singleton: `crm_store` collection builds on **first use**, not at import (`ENV4` — all lazy singletons `None` after `import crm_store`).
+- `CRM2` Lead record shape keyed on brand `Uniq_Id`: `{uniq_id, domain, status, stage, profile, contact_ids[], win_prob, outreach_state, notes, updated_at}`.
+- `CRM3` `upsert_lead`/`get_lead`/`update_lead_stage` round-trip; upsert is **idempotent** (same `uniq_id` updates, never duplicates).
+- `CRM4` Writes that expose/modify private contact fields go through the **Policy-4 auth gate** (`lead_store.authenticate_and_get_contact`); no/invalid key leaks **no** field (mirrors `AG1`–`AG6`).
+- `CRM5` `opt_out_status == True` contacts are suppressed from the workspace's outbound-eligible set.
+- `CRM6` `compute_win_prob` is **deterministic** and sourced **only** from catalog/record signals (tier, incidents, ICP count, pixels) — Policy 1 (no parametric invention); boundary-tested.
+- `CRM7` No secret / `corporate_access_key` value in any returned payload, log, or tracked file (`G4`).
+- `CRM8` `write_qualified_leads` upserts CRM records; `qualified_leads.json` remains a ≤3-capped export view (Policy 5 / `CL*` cross-check).
+
+### Layer 5b — Profile Expander / contact discovery (`discover_contacts`)  — Stage 12
+- `DISC1` Returns the contact-candidate shape: `{brand_id, contacts: [{first_name, last_name, role, email, linkedin_url}], count}` (JSON-serializable).
+- `DISC2` Injectable `client` (mocked Apollo + grounded search); under the mock the output is deterministic; no live egress at test time.
+- `DISC3` Does **not bypass** the Policy-4 gate: discovery performs **no privileged read** of the auth-gated `lead_store` contacts collection and exposes **no stored private contact field** — it surfaces only freshly-discovered candidate data and attaches candidate refs to the CRM lead's `contact_ids` (workspace metadata). The Policy-4 gate remains the single, un-bypassed path to existing private records; auth + `opt_out_status` for actual outbound are enforced downstream at L6 dispatch.
+- `DISC4` Anti-leakage (`G2`/`G4`): no hardcoded contacts/secrets; tool count is now **10** (three-way identity assert passes).
+- `DISC5` Import-safety holds (`ENV4`).
+
+### Layer 6 — Outreach Engine (deterministic post-loop engine)  — Stages 13–14
+- `OUT1` `schedule_outreach_cohort` batches leads into cohorts of **≤ `DAILY_SEND_CAP` (=50)**; the previously-dead constant is now wired and enforced.
+- `OUT2` `dispatch_outreach` egress is isolated to `OUTREACH_SUBDOMAIN` only (`INT1` extension); no other host is contacted for sends.
+- `OUT3` `opt_out_status == True` ⇒ **never dispatched**, regardless of fit.
+- `OUT4` Dispatch passes the **Policy-4 auth gate** and **`gateway_validate`** before leaving the process; an invalid payload aborts the send (structured rejection, no raise).
+- `OUT5` No secret (Slack webhook, email/Apollo/PhantomBuster keys) appears in logs, errors, returns, or tracked files.
+- `OUT6` A new **escalation path** handles unanswered borderline (Slack-gated) approvals — a sibling `escalate_prospect(...)` (mocked escalator: escalation message + calendar booking). `route_prospect`'s existing TG1/TG2 keys/behaviour stay **byte-stable** (untouched — escalation is additive/separate).
+- `OUT7` `outreach_status_brief` returns a morning-brief/heartbeat rollup (cohort counts, sends, replies) with A/B variant tags — deterministic under mocks.
+- `OUT8` End-to-end wiring: a discovery query flows L1 ICP doc → L5 CRM records → L6 cohorts → mocked dispatch → status brief, all under the 15-call cap; a no-match seed still yields byte-exact `FALLBACK_MESSAGE`.
+- `OUT9` Idempotent re-run: deterministic cohorts/brief; no duplicate sends on replay.
+- `OUT10` Packaging refreshed: `crm_store.py` in `MANIFEST.txt`; `ENV4` holds on the final tree; full regression green.
+
+---
+
+## §11. Phase 3 — Integration Layer (FastAPI server; FE↔BE wiring)
+
+> New, **additive** HTTP layer (`api_server.py` + `api_adapters.py` + `api_seed.py`) exposing the
+> backend to the React frontend. v1 is **offline-deterministic** (a `crm_store` seed; no API keys).
+> The graded backend is untouched — the API only READS. Plan: `~/.claude/plans/sprightly-tinkering-hennessy.md`.
+> All transports offline; `import main`/`import api_server` stay side-effect-free (ENV4 preserved).
+
+- `INTG0` **Dep-lock gate:** exact `==` pins for `fastapi`, `uvicorn`, `httpx`, `jsonschema` (+ `anyio`
+  if needed) added to `requirements.txt`; the **full pre-existing suite still passes (684 passed,
+  1 skipped, 0 failed)** in `.venv` after install. No wildcards (CLAUDE.md §1.1).
+- `INTG1` **Import-safety:** `python -c "import api_server"` from an empty dir with **no
+  `ANTHROPIC_API_KEY`** exits 0 with zero side effects (seed fires only on ASGI `lifespan` startup,
+  never on import); `import main, lead_store, rag_engine, crm_store` still clean; `main` never imports
+  `api_server`.
+- `INTG2` **Test isolation:** `tests/conftest.py` autouse fixture resets `crm_store._leads_collection`
+  and `lead_store._collection_instance` to `None` between tests; the startup seed does not leak into
+  `CRM*`/`DISC*`/`ENV4` tests (full regression stays green).
+- `INTG3` **Health + scaffold:** `GET /api/health` returns 200; FastAPI `app` constructs with no backend
+  side effects; CORS `allow_origins` is localhost-only (recorded in NOTES).
+- `INTG4` **Leads endpoints:** `GET /api/leads` → `Lead[]`, `GET /api/leads/stats` →
+  `LeadDiscoveryStats`, `POST /api/leads/find-more` (body `{existing_domains[],target}`) → deduped
+  `Lead[]`; bodies validate against `schemas/*.json`.
+- `INTG5` **Adapter contract + thresholds:** `crm_lead_to_ui` emits camelCase, strips `contact_ids`,
+  never emits `corporate_access_key`; GovBand (`≥3`/`1–2`/`0`) + FitGrade (`≥4`/`2–3`/`≤1`) + LeadKind
+  rules are exact and unit-tested.
+- `INTG6` **ICP endpoints (offline seed):** `GET /api/icp` → `IcpDocument` from the seed dict (NOT a
+  live `build_icp_document` call), `GET /api/icp/suggestions` → `string[]`; field map per the plan.
+- `INTG7` **Outreach stats/cohorts:** `GET /api/outreach/stats` → `OutreachStats` (from the full
+  `run_outreach_pipeline` return), `GET /api/outreach/cohorts` → `Cohort[]` (synthesized name/enrolledAt/
+  variants); deterministic under the seed.
+- `INTG8` **Enrollments + mock split:** `GET /api/outreach/enrollments` → `EnrollmentEvent[]` derived
+  from real cohort data; `getReachSeries`/`getAgentEvents`/`runDiscovery`/`getSwarmStages` stay FE-mock
+  (no backend route in v1) — the network tab shows only real-data `/api/...` calls.
+- `INTG9` **FE wiring:** the 8 wired `api.ts` methods call `fetch(BASE_URL+…)` via the vite `/api`
+  proxy with zero component changes; `findMoreLeads` gains a `catch`/error state; `tsc --noEmit` clean.
+- `INTG10` **Contract parity + live proof:** committed `schemas/*.json` (generated from `types/index.ts`)
+  validate every wired response in `test_api.py`; two-server Preview-MCP check shows each wired screen
+  rendering backend data (real `GET /api/...` 200s in the network tab); kill-backend → UI error state.
+
+---
+
+## §12. Phase 4 — Durable Persistence Layer (MongoDB via `pymongo`; core stores)
+
+> A real database replaces the in-memory `mongomock` stores. A shared lazy `db.py` returns a
+> `pymongo.MongoClient(MONGO_URI)` when `MONGO_URI` is set, else **falls back to `mongomock`** — so the
+> offline suite, ENV4 import-safety, and the Policy-4 auth gate are untouched and a real DB is opt-in via
+> env. Scope = the **`contacts`** (`lead_store.py`) + **`leads`** (`crm_store.py`) collections; the brands
+> catalog stays a CSV input. Decisions: `NOTES.md` (2026-06-20). Plan: `~/.claude/plans/moonlit-herding-moon.md`.
+> All offline checks run with **no `MONGO_URI`**; live persistence checks are `skipif`-gated like `S10`.
+
+- `DB0` **Dep-lock gate:** exact `==` pin for `pymongo` (captured from the actual `.venv` install, not
+  guessed) added to `requirements.txt`; `mongomock==4.1.2` retained as the fallback/test driver; no
+  wildcards (CLAUDE.md §1.1); the **full pre-existing suite still passes (754 passed, 1 skipped, 0 failed)**
+  with `MONGO_URI` unset.
+- `DB1` **No secrets:** no real connection string / credential in any tracked file; `.env` is gitignored;
+  `.env.example` carries only a placeholder `MONGO_URI` (G4 grep clean).
+- `DB2` **Import-safety (ENV4 extended):** `python -c "import db"` from an empty dir with no `MONGO_URI`
+  exits 0 with zero side effects; `db._client` stays `None` until the first `get_mongo_client()` call; no
+  connection/network at import; `import main, lead_store, crm_store, rag_engine, api_server` still clean.
+- `DB3` **Env-driven fallback:** `get_mongo_client()` returns a `pymongo.MongoClient` when `MONGO_URI` is
+  set and a `mongomock.MongoClient` when unset — both branches unit-tested via monkeypatched env, no real
+  network; `get_database()` returns `client[DB_NAME]` (default `gtm_db`).
+- `DB4` **Stores routed through `db.py`:** `lead_store.get_lead_data_collection()` and
+  `crm_store.get_crm_collection()` obtain their collection via `db.get_database()`; the Policy-4 auth gate
+  remains the single chokepoint (signature + denial semantics byte-stable); the CRM record shape is unchanged.
+- `DB5` **Idempotent contacts seed:** `get_lead_data_collection()` loads `contacts.json` **only when the
+  collection is empty** (no unconditional `insert_many`); a 2nd call against a persistent client does NOT
+  duplicate; `tests/conftest.py` also resets `db._client`; full regression stays **754/1** on the mongomock path.
+- `DB6` **Indexes:** unique index on `leads.uniq_id` and `contacts.email` (+ index on
+  `contacts.target_brand_id`), created idempotently inside the getters and guarded so they do not error
+  under mongomock; uniqueness enforced under real Mongo.
+- `DB7` **Restart durability (live, `skipif` no `MONGO_URI`):** upsert a lead → reset the `db`/store
+  singletons → reconnect → the lead is still present; same gating pattern as `S10` so the offline suite
+  stays deterministic.
+- `DB8` **Idempotent seed script:** `scripts/seed_db.py` loads `contacts.json` into Mongo **seed-if-empty**;
+  running it twice yields no duplicate contact documents.
+- `DB9` **Packaging + docs:** `db.py` + `pymongo` listed in `MANIFEST.txt`; `CLAUDE.md` (§1.1 pins, §2
+  layout, §3.4 import-safety) and `NOTES.md` updated (persistence decision, rejected SQLite/Postgres, index
+  choices); ENV4 holds for all modules incl. `db.py`; **754/1 + the new `DB*` tests** green.
+
+---
+
+## §13. Phase 5 (proposed) — DB ↔ backend wiring
+
+> Connecting the Phase-4 persistent DB into the API/pipeline. Full plan: `backend_connection_plan.md`
+> (stages C0–C5). Only **C0** is executed so far; the rest stay plan-only pending Asaf approval.
+
+- `CONN0` **No demo clobber:** with a persisted, non-empty `leads` collection (`MONGO_URI` set), an API
+  startup does **not** modify or overwrite existing records — `api_seed.seed_demo()` is seed-if-empty (skips
+  when the workspace is non-empty) and honours a `SEED_DEMO` opt-out. Import-safety preserved (seed still
+  fires only on ASGI `lifespan`, never at import).
+- `CONN1` **Offline dev unchanged:** on the mongomock path (`MONGO_URI` unset, workspace always empty at
+  boot) the 16 demo leads still seed, so the FE dev experience is identical; full offline suite stays green.
+
+---
+
 ## Check-to-stage map (sanity)
 
 | Stage | Checks |
@@ -246,8 +386,25 @@ Driven by `FakeReasoningClient`.
 | 2 tool layer | `T1`–`T8` |
 | 3 schemas + dispatch | `S0`–`S10` |
 | 4 loop + cap + resiliency | `L1`–`L5`, `RS1`–`RS5` |
-| 5 policies + gateway | `POL1`, `POL2`, `PR1`–`PR4`, `CL1`–`CL4`, `TG1`–`TG2`, `FB1`–`FB4`, `GW1`–`GW5` |
+| 5 policies + gateway | `POL1`, `POL2`, `CL1`–`CL4`, `TG1`–`TG2`, `FB1`–`FB4`, `GW1`–`GW5` *(`PR1`–`PR4` retired — Policy 3 removed)* |
 | 6 hybrid RAG / RRF | `RAG1`–`RAG5`, `T6.*` |
 | 7 single-vertical E2E | `E1`–`E4` |
 | 8 generalization / anti-leakage | `G1`–`G5` |
 | 9 multi-channel integration + packaging | `INT1`–`INT3`, `H1`–`H5` |
+| **10 L1 ICP Builder** (Phase 2) | `ICPB1`–`ICPB6` |
+| **11 L5a mini-CRM core** (Phase 2) | `CRM1`–`CRM8` |
+| **12 L5b contact discovery** (Phase 2) | `DISC1`–`DISC5` |
+| **13 L6a outreach core** (Phase 2) | `OUT1`–`OUT6` |
+| **14 L6b outreach center + packaging** (Phase 2) | `OUT7`–`OUT10`, re-run `INT1`–`INT3`, `H1`–`H5` |
+| **I0 dep-lock gate** (Phase 3) | `INTG0` |
+| **I1 API scaffold + import-safety + conftest** (Phase 3) | `INTG1`–`INTG3` |
+| **I2 leads + ICP endpoints + adapters + seed** (Phase 3) | `INTG4`–`INTG6` |
+| **I3 outreach endpoints** (Phase 3) | `INTG7`–`INTG8` |
+| **I4 FE wiring + contract tests + live verify** (Phase 3) | `INTG9`–`INTG10` |
+| **I5 live-pipeline + deferred routes** (Phase 3, follow-on) | (deferred; OQ-7-gated) |
+| **D0 dep-lock + infra gate** (Phase 4) | `DB0`–`DB1` |
+| **D1 `db.py` connection layer** (Phase 4) | `DB2`–`DB3` |
+| **D2 route stores through `db.py` + idempotent seed** (Phase 4) | `DB4`–`DB5` |
+| **D3 durability + indexes + restart proof** (Phase 4) | `DB6`–`DB8` |
+| **D4 packaging + docs** (Phase 4) | `DB9` |
+| **C0 stop demo-seed clobber** (Phase 5) | `CONN0`–`CONN1` |

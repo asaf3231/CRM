@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Light design tokens extracted from the SLED.ai product screenshots (Images/*.png).
+ * Off-white app surface, white cards, hairline gray borders, near-black primary,
+ * green tag/accent pills, and a domain status palette (Strong / Light Gov / etc.).
+ */
+@layer base {
+  :root {
+    --background: 40 14% 97%;        /* warm off-white app canvas */
+    --foreground: 220 14% 16%;       /* near-black slate text */
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 14% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 14% 16%;
+
+    --primary: 222 24% 18%;          /* dark slate buttons */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 40 10% 94%;
+    --secondary-foreground: 220 14% 26%;
+
+    --muted: 40 10% 95%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 152 32% 92%;           /* soft green chip background */
+    --accent-foreground: 152 45% 24%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 8% 90%;
+    --input: 30 8% 88%;
+    --ring: 222 24% 30%;
+
+    --sidebar: 222 24% 13%;          /* dark icon rail */
+    --sidebar-foreground: 220 14% 78%;
+
+    --success: 152 45% 38%;          /* green badges (Strong / Retained) */
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 48%;           /* amber (medium / queued) */
+    --warning-foreground: 0 0% 100%;
+    --info: 214 80% 52%;             /* blue (gov / info) */
+    --info-foreground: 0 0% 100%;
+
+    --radius: 0.625rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}

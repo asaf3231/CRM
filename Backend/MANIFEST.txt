@@ -1,0 +1,60 @@
+# MANIFEST.txt — ReactFirst AI Proactive Outbound Engine
+# Stage 9 packaging allowlist (H5).
+#
+# Purpose:
+#   This file lists the EXACT set of files that constitute the shipped
+#   deliverable. Any build/bundle script must copy FROM this allowlist —
+#   never zip the whole directory.
+#
+# Allowlist decision (Stage 9, 2026-06-18; db.py added Phase 4, 2026-06-20):
+#   Shipped: main.py, db.py, lead_store.py, crm_store.py, rag_engine.py,
+#            requirements.txt, angle_corpus.json, README.md (optional, if present).
+#   db.py is the shared Mongo connection layer imported by lead_store.py + crm_store.py,
+#   so it MUST ship; the engine stays import-safe and falls back to mongomock when
+#   MONGO_URI is unset.
+#
+#   Excluded (dev-only / generated / secret-bearing):
+#     tests/                    — TDD suite, dev-only, never shipped
+#     Reference/                — quality benchmark, dev-only
+#     Architecture Specification & Product Requirements Document (PRD).pdf
+#                               — source reference, not a runtime artifact
+#     CLAUDE.md                 — project rules, dev-only management file
+#     PLAN.md                   — stage tracker, dev-only management file
+#     QA_checklist.md           — TDD blueprint, dev-only management file
+#     NOTES.md                  — decisions log, dev-only management file
+#     ORCHESTRATION.md          — PM workflow, dev-only management file
+#     PM_Methodology_Prompt.md  — PM methodology, dev-only management file
+#     briefs/                   — stage briefs, dev-only management files
+#     handbacks/                — stage handbacks, dev-only management files
+#     .chroma/                  — local Chroma persistence, machine-local generated
+#     assets/                   — generated PDFs, machine-local artifacts
+#     .venv/                    — virtual environment, not shipped
+#     .DS_Store                 — macOS metadata, never shipped
+#     reactfirst_run.log        — generated log, not shipped
+#     qualified_leads.json      — generated artifact, not shipped
+#
+#   Runtime input fixtures (excluded by default — grader provides at runtime):
+#     brands_catalog.csv        — provided by the grader/operator at runtime
+#     contacts.json             — provided by the grader/operator at runtime
+#     gtm_policies.txt          — provided by the grader/operator at runtime
+#
+#   The 3 runtime input fixtures are intentionally excluded from the bundle.
+#   The engine loads whatever is present in the cwd at runtime (G5 generalization
+#   property). This is the documented default per CLAUDE.md §2 and Stage 9 NOTES.
+#
+#   Optional persistence/infra helpers (Phase 4 — NOT required for the import-safe
+#   engine, which uses the mongomock fallback when MONGO_URI is unset):
+#     docker-compose.yml        — local-dev MongoDB (mongo:7 + named volume)
+#     .env.example              — env template (MONGO_URI / DB_NAME); never commit a real .env
+#     scripts/seed_db.py        — idempotent DB seed (seed-if-empty)
+#
+# Format: one entry per line; relative paths only; no absolute paths.
+# Lines starting with '#' are comments.
+#
+main.py
+db.py
+lead_store.py
+crm_store.py
+rag_engine.py
+requirements.txt
+angle_corpus.json

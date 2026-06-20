@@ -24,5 +24,8 @@ brands_catalog.csv
 contacts.json
 gtm_policies.txt
 
+# Local secrets (real values go here; .env.example is tracked and safe to commit)
+.env
+
 # macOS
 .DS_Store

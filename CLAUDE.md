@@ -11,14 +11,21 @@ Maintained by: Asaf
 
 ## 0. Working methodology
 
-This project uses a lightweight four-file PM workflow:
+This project uses a lightweight file-based PM workflow:
 
 ```text
-CLAUDE.md        = permanent rules and conventions  (this file)
-PLAN.md          = current stage tracker and Definition of Done
-QA_checklist.md  = the Test-Driven-Development blueprint (every DoD points here)
-NOTES.md         = decisions, verified facts, blockers, and handbacks
+CLAUDE.md                = permanent rules and conventions  (this file)
+PLAN.md                  = current stage tracker and Definition of Done
+QA_checklist.md          = the Test-Driven-Development blueprint (every DoD points here)
+NOTES.md                 = decisions, verified facts, blockers, and handbacks
+PM_LOG.md                = PM→PM session handoff log (begin/end ritual)
+PM_Methodology_Prompt.md = how the PM works (role, budget rules, memory architecture)
 ```
+
+**PM session ritual (non-negotiable):** every PM session opens by reading
+`PM_Methodology_Prompt.md` + the latest `PM_LOG.md` entry, writes a `SESSION START` entry to
+`PM_LOG.md` before working, and writes a `SESSION END / HANDOFF` entry before stopping. Only
+the PM writes `PM_LOG.md`; executer/reviewer subagents never touch it.
 
 At the start of every Claude Code session:
 
@@ -46,6 +53,22 @@ per-stage "stop and report" of §0 above still binds the **executer** — it nev
 stage boundary or changes a contract; it surfaces those as `DECISION-NEEDED`, which the PM
 converts into a halt. The shared memory is the repo files (`PLAN.md`/`NOTES.md` ledger +
 `briefs/`/`handbacks/` mailbox).
+
+**Adopted methodology patterns (Asaf, 2026-06-19 — from obra/superpowers, selectively).**
+The four-file spine + `swe-executer` + `pm-run` loop stays authoritative; we folded in four
+patterns rather than replacing it (rationale + rejected alternatives in `NOTES.md`):
+- **Reviewer gate** — on stages that touch a **graded contract**, the PM spawns a cold,
+  read-only **`swe-reviewer`** subagent (`.claude/agents/swe-reviewer.md`) for an independent
+  two-stage review (spec-compliance, then code-quality) before marking ✅. A
+  `CHANGES-REQUIRED` verdict consumes the single auto-retry. Trigger list + wiring in
+  `ORCHESTRATION.md`. Non-contract stages skip it.
+- **`systematic-debugging` skill** (`.claude/skills/`) — the executer runs this 4-phase
+  root-cause loop on a failed check, especially on a retry.
+- **`brainstorming` skill** (`.claude/skills/`) — a design-refinement phase for *new*
+  features, before `PLAN.md` decomposition; skip it for work already specified in PLAN/QA.
+- **Context-minimization** — subagents get only the brief + diff (`scripts/review-package.sh`),
+  never the whole repo/plan. Skills are committed **project-local** (not a per-machine plugin)
+  so every PM agent and cold subagent in this repo sees them automatically.
 
 ---
 
@@ -80,7 +103,8 @@ You should see `(.venv)` in the prompt. Never `pip install` outside the venv.
 anthropic           # ⚠ pin exact ==version at Stage 1 install — the LLM provider for the whole pipeline (Claude)
 chromadb==0.5.5
 sentence-transformers==3.0.1
-mongomock==4.1.2
+mongomock==4.1.2    # offline/test fallback driver for the stores (Phase 4)
+pymongo==4.17.0     # real MongoDB driver — used when MONGO_URI is set (Phase 4 persistence layer)
 pandas==2.2.2
 firecrawl-py        # ⚠ pin exact ==version at Stage 1 install (OQ-2)
 ```
@@ -115,16 +139,23 @@ API keys come from environment variables (`os.environ`), never hardcoded and nev
 
 Expected project layout. **Layout decision (locked 2026-06-18):** `main.py` is the orchestrator and entry point; the stateful / heavy-dependency concerns live in their own modules beside it so the pipeline stays reviewable and each tool tests in isolation.
 
+> **⚠ LAYOUT UPDATE (2026-06-20, Asaf-approved reorg):** all backend code + the 3 runtime data files + `angle_corpus.json` + `tests/` + `scripts/` + `assets/` + `requirements.txt` + `docker-compose.yml` + `MANIFEST.txt` + `.env.example` now live under a self-contained **`Backend/`** directory (mirrors `frontend/`). PM/spine docs (`CLAUDE.md`, `PLAN.md`, `NOTES.md`, `QA_checklist.md`, `data_plan.md`, `PM_LOG.md`, `ORCHESTRATION.md`, `briefs/`, `handbacks/`) stay at the **repo root**. **The runtime cwd is now `Backend/`** — run `cd Backend && uvicorn api_server:app` and `cd Backend && python -m pytest tests/`. The tree below still reads correctly **relative to `Backend/`** (no module imports or path logic changed; paths are `__file__`/`os.getcwd()`-relative). Verified: full suite from `Backend/` = 765 passed / 5 skipped / 0 failed; ENV4 holds. Details in `NOTES.md` (2026-06-20 senior-PM entry).
+
 ```text
 CRM/                                  # working dir == runtime cwd
 │  # --- code ---
-├── main.py                            # orchestrator: config, the 8 tools, schemas, dispatch, agentic loop, policy wiring, main()
-├── lead_store.py                     # mongomock-backed CRM store + Policy 4 corporate_access_key auth gate
+├── main.py                            # orchestrator: config, the tools (10), schemas, dispatch, agentic loop, policy wiring, L6 outreach engine, main()
+├── db.py                             # shared lazy Mongo connection layer (Phase 4): pymongo if MONGO_URI set, else mongomock fallback
+├── lead_store.py                     # MongoDB-backed CRM *contacts* store (via db.py) + Policy 4 corporate_access_key auth gate
+├── crm_store.py                      # MongoDB-backed mini-CRM *lead workspace* (L5, via db.py): lazy singleton; lead state/profile/win-prob (Phase 2)
 ├── rag_engine.py                     # ChromaDB (all-MiniLM-L6-v2) + BM25 + RRF tiering — the lazy local vector store
 ├── requirements.txt                  # pinned deps
+├── docker-compose.yml                # local-dev MongoDB (mongo:7 + named volume) for the Phase-4 persistence layer (optional infra)
+├── .env.example                      # env template (MONGO_URI / DB_NAME); real values go in a gitignored .env — never committed
+├── scripts/seed_db.py                # idempotent DB seed (seed-if-empty); loads contacts.json into the configured Mongo
 │  # --- runtime data: the three bounded inputs (single source of truth — PRD §2; NOT business logic) ---
 ├── brands_catalog.csv                # the 9-column Brands Data Catalog (schema in §4)
-├── contacts.json                     # CRM contact records, loaded into mongomock by lead_store.py (schema in §4.1)
+├── contacts.json                     # CRM contact records, loaded into MongoDB (via db.py) by lead_store.py on first call, seed-if-empty (schema in §4.1)
 ├── gtm_policies.txt                  # the GTM operational policy matrix parsed before any outbound state
 │  # --- runtime artifacts (produced by a run) ---
 ├── reactfirst_run.log                # the agentic run log (literals — §7)
@@ -192,7 +223,7 @@ The query class determines the path: an auth/lookup query (Q1) → authenticate 
 
 ### 3.4 Import-safety contract (restated — it is graded)
 
-No module-level work beyond defining constants, functions, classes, and schemas. Specifically forbidden at import time: constructing the Anthropic/Firecrawl/SerpAPI/Tavily clients, loading the SentenceTransformer model, opening/building the Chroma collection, running `get_lead_data_collection()` (mongomock + `contacts.json` load), reading any of the three input files, or writing any file. Use lazy singletons (`_get_client()`, `_get_embedder()`, `_get_collection()`, `_get_store()`). Verified by `ENV4`.
+No module-level work beyond defining constants, functions, classes, and schemas. Specifically forbidden at import time: constructing the Anthropic/Firecrawl/SerpAPI/Tavily clients, loading the SentenceTransformer model, opening/building the Chroma collection, constructing the shared Mongo client in `db.py` (`get_mongo_client()` — `pymongo` if `MONGO_URI` is set, else `mongomock`), running `get_lead_data_collection()` / `get_crm_collection()` (the Mongo client + `contacts.json` seed-if-empty), reading any of the three input files, or writing any file. Use lazy singletons (`_get_client()`, `db.get_mongo_client()`, `_get_embedder()`, `_get_collection()`, `_get_store()`). Verified by `ENV4`.
 
 ---
 
@@ -296,9 +327,17 @@ These are behavioral contracts parsed from `gtm_policies.txt`. Each has a dedica
 
 ---
 
-## 6. The 8 tools — exact contract
+## 6. The tools — exact contract
 
-Exactly **8 tools**. Each needs a Python function **and** a JSON schema (§ schema rules below). Adding tools earns no credit and dilutes the schemas.
+**Tool count amended to 10 (Asaf, 2026-06-19, Phase 2).** The original 8 graded tools below are the
+canonical core and are **unchanged**. Phase 2 (SLED 6-layer parity, scope L1+L5+L6) adds **two**
+LLM-callable tools — `build_icp_document` (Layer 1) and `discover_contacts` (Layer 5) — taking the
+total to **10**. The earlier "exactly 8 / adding tools earns no credit" rule referred to the original
+graded assignment; the expansion is a deliberate, recorded deviation toward the Idan Benaun / SLED 6-layer
+engine (see `NOTES.md`). The import-time three-way name-identity assert (§9) now checks **10**, not 8.
+Layer 6 (outreach) is built as a **deterministic post-loop engine** of plain functions (not LLM tools),
+so it does **not** add to the tool count or the 15-call cap. Each tool still needs a Python function **and**
+an Anthropic-shaped JSON schema; the two new tools follow the exact same pattern as the core 8.
 
 | # | Signature | Model / env | Returns | Notes |
 |---|---|---|---|---|
@@ -409,8 +448,9 @@ CHUNK_MAX_DOMAINS    = 100
 CHUNK_TIME_BUDGET_S  = 800
 FANOUT_RECOVERY_THRESHOLD = 2
 DEFAULT_QUERY_COUNT  = 15
-DAILY_SEND_CAP       = 50          # outbound messages/day/inbox
+DAILY_SEND_CAP       = 50          # outbound messages/day/inbox — WIRED by the L6 cohort scheduler (Phase 2)
 LATENCY_TARGET_S     = 900         # signal→campaign SLO (soft)
+ICP_ANCHOR_COUNT     = 5           # L1 build_icp_document example/anchor-lead ceiling (Phase 2)
 EMBED_MODEL          = "all-MiniLM-L6-v2"
 REASONING_MODEL      = "claude-opus-4-8"     # main agentic loop
 ANALYZER_MODEL       = "claude-sonnet-4-6"   # analyze_company_chunk
@@ -424,11 +464,11 @@ CATALOG_COLUMNS = [
     "Main_Competitor_Id", "Gtin_Prefix",
 ]
 
-TOOL_SCHEMAS  = [...]        # the 8 JSON schemas
-TOOL_DISPATCH = {"generate_search_queries": generate_search_queries, ...}
+TOOL_SCHEMAS  = [...]        # 10 JSON schemas (8 core + build_icp_document + discover_contacts)
+TOOL_DISPATCH = {"generate_search_queries": generate_search_queries, ...}   # 10 entries
 ```
 
-- Tool function name == schema name == dispatch key. A mismatch breaks dispatch correctness — guard it with an import-time `assert`.
+- Tool function name == schema name == dispatch key. A mismatch breaks dispatch correctness — guard it with an import-time `assert` (now asserts **10**).
 - Avoid vague names (`tmp`, `res2`, `do_thing`). Helpers say what they do (`gateway_validate`, `cap_angles`, `dual_log`, `truncate_for_log`).
 
 ---

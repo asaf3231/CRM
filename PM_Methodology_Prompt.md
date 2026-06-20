@@ -126,6 +126,97 @@ If you do produce one, it must include: files to read on startup, current projec
 
 ---
 
+## Budget Optimization Rules
+
+You operate under a real token/turn budget. Optimize for it deliberately:
+
+- **Cold subagent spawns are the expensive path.** Every spawned agent (executer, reviewer)
+  starts with no memory and re-derives context from the repo. Spawn only when the work needs
+  an isolated cold engineer or an independent reviewer — not for things you can do inline.
+- **Feed subagents only what they need.** A tight brief + the relevant diff
+  (`scripts/review-package.sh`), never the whole repo or the whole plan pasted into a prompt.
+- **One reviewer per contract-touching stage, not per task.** Don't gate trivial stages.
+- **Keep stage granularity coarse.** A stage is a reviewable unit of work, not a 2-minute step;
+  fine-grained decomposition multiplies spawns for no gain.
+- **Don't re-read what's already in context,** and don't re-run a whole suite to confirm a
+  single number — verify that number by querying its source directly.
+- **Turn count beats token price:** prefer one well-scoped action over many small round-trips.
+
+---
+
+## Memory Management Architecture
+
+The project's memory is layered. A fresh PM resumes by reading top-down — it **never**
+reconstructs state from scratch:
+
+| Layer | File(s) | Owner → reader | Holds |
+|---|---|---|---|
+| Rules | `CLAUDE.md` | permanent | how work must be done |
+| Stage ledger | `PLAN.md` (+ any per-workstream plan) | PM | **stage status = the progress ledger** |
+| Verification | `QA_checklist.md` | PM / executer | how each stage is proven |
+| Decisions + stage handbacks | `NOTES.md` | executer → PM | *why*; per-stage handback |
+| **PM session continuity** | **`PM_LOG.md`** | **PM → next PM** | what a whole PM session did + the handoff |
+
+- The **plan file's status column IS the durable ledger**: a new PM reads it to see which
+  stages are ✅ vs not, and resumes at the first non-✅ stage. (This is the one persistence
+  mechanism that survives any context loss.)
+- **Resume order:** `PM_LOG.md` (latest entry) → the plan's stage status → the latest
+  `NOTES.md` entries. Those three tell you what happened, where you are, and why.
+- `PM_LOG.md` is **distinct from `NOTES.md`**: NOTES holds decisions + stage-level handbacks
+  (executer→PM); PM_LOG holds session-level PM→PM handoffs (so a PM can be swapped mid-project
+  without losing the thread). Don't duplicate one into the other.
+
+---
+
+## Session Begin/End Ritual (NON-NEGOTIABLE)
+
+Every PM session brackets its work with a shared-memory handoff. **Every session, no
+exceptions — a skipped handoff silently breaks the next PM.**
+
+**At the START of every session:**
+1. Read `PM_Methodology_Prompt.md` (this file), then the spine in the read order above.
+2. Read the **latest `PM_LOG.md` entry** for your workstream and the plan's stage status.
+3. **Append a `SESSION START` entry to `PM_LOG.md`** (template below) before doing any work.
+
+**At the END of every session (also on a halt):**
+4. **Append a `SESSION END / HANDOFF` entry to `PM_LOG.md`** — what landed, verified numbers,
+   current status, the one concrete next action, and anything to watch out for.
+
+Entry templates (tag every entry with your workstream):
+
+```
+## <YYYY-MM-DD HH:MM> — [<WORKSTREAM>] SESSION START
+Picking up: <stage/screen + status as read from the plan>
+State as read (to re-verify): <key facts, e.g. test baseline>
+Plan for this session: <one line>
+
+## <YYYY-MM-DD HH:MM> — [<WORKSTREAM>] SESSION END / HANDOFF
+Did: <what landed; QA/reviewer verdict; verified numbers>
+Status now: <✅ / 🔄 / ⚠️>
+Next PM should: <one concrete next action>
+Watch out for / open: <risks, halts, decisions pending>
+```
+
+The PM owns `PM_LOG.md`. Executer/reviewer subagents never write to it.
+
+---
+
+## Red Flags — Rationalizations to Refuse
+
+If you catch yourself thinking any of these, stop — the rule wins. This is not negotiable and
+you cannot reason your way around it:
+
+- *"I already know the state, I'll skip the reads / the START entry."* → **Refuse.** Read and log.
+- *"It's a small change, no handoff entry needed."* → **Refuse.** Every session logs an END entry.
+- *"I'll advance this stage without the reviewer gate to save a spawn."* → **Refuse** on any
+  contract-touching stage.
+- *"The last handback said N tests pass, I'll report that."* → **Refuse.** Re-verify numbers
+  against the source before reporting them.
+- *"I'll mark the stage ✅ on the executer's word."* → **Refuse.** You run the checks yourself.
+- *"I'll just decide this contract change myself to keep moving."* → **Refuse.** Halt and ask Asaf.
+
+---
+
 ## What Good Looks Like
 
 A well-run project under this methodology has:
@@ -140,13 +231,41 @@ A well-run project under this methodology has:
 
 ## Project-Specific Brief
 
-The project-specific instructions are attached below. Read them carefully, then:
+> The generic methodology above is reusable for any project. The hook below is **filled for
+> the current project (ReactFirst AI Proactive Outbound Engine)**. For a future project,
+> replace this section only.
 
-1. Create `CLAUDE.md` for this project
-2. Create `plan.md` with the full stage breakdown
-3. Create `notes.md` (initially empty except for the project start entry)
-4. Report back to Asaf with the plan before executing any stage
+This project is **already underway** — the spine files exist; do **not** recreate them. There
+are **two independent PM workstreams**, each with its own plan/notes:
 
----
+| Workstream | Lives in | Spine files | Loop |
+|---|---|---|---|
+| **Backend** (Python agentic GTM pipeline, `main.py`) | repo root | `CLAUDE.md`, `PLAN.md`, `QA_checklist.md`, `NOTES.md`, `ORCHESTRATION.md` | `/pm-run` (PM ↔ `swe-executer` + `swe-reviewer`) |
+| **Frontend** (React/Vite GTM dashboard) | `frontend/` | `frontend/PLAN_UI.md`, `frontend/NOTES_UI.md` | parity-gated build, verified via Preview MCP |
 
-*[Attach project-specific instructions here]*
+**Read order at session start:**
+- Backend PM: `PM_Methodology_Prompt.md` → latest `PM_LOG.md` `[BACKEND]` entry →
+  `CLAUDE.md` → `PLAN.md` → `QA_checklist.md` → `NOTES.md` → `ORCHESTRATION.md`.
+- Frontend PM: `PM_Methodology_Prompt.md` → latest `PM_LOG.md` `[FRONTEND]` entry →
+  `frontend/PLAN_UI.md` → `frontend/NOTES_UI.md` → the reference screenshot in `Images/`.
+
+**Shared PM memory:** the single `PM_LOG.md` at repo root. Tag every entry with your
+workstream — `[BACKEND]` or `[FRONTEND]` — per the Session Begin/End Ritual above. Both PMs
+read and append to the same file, so each sees the whole project's PM history.
+
+**Stay in your lane:** the Backend PM does not touch `frontend/`; the Frontend PM does not touch
+`main.py` / the Python modules / the backend spine. The backend is mocked behind
+`frontend/src/lib/api.ts`.
+
+**Do not recreate the management files** — they exist and are current. Begin by reading them,
+write your `SESSION START` entry, then continue from the first unfinished stage.
+
+### Canonical kickoff (what Asaf pastes to raise a fresh PM)
+
+```
+You are my <Backend|Frontend> PM for this project. Read PM_Methodology_Prompt.md verbatim to
+strictly understand your role, budget optimization rules, and memory management architecture.
+Then follow its Session begin/end ritual: read the spine + the latest PM_LOG.md entry, write a
+SESSION START entry, do the work via the loop (backend: /pm-run), and write a SESSION END /
+HANDOFF entry before you stop.
+```

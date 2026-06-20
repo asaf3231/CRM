@@ -27,6 +27,13 @@ say so in the handback under DECISION-NEEDED. Do not guess.
 - **TDD, run-verified.** For each QA check in your brief: identify or write the check
   first, implement, then **run it**. A check is "done" only when it passes by being
   *run*, never by inspection. Quote the actual command + output in your handback.
+- **When a check fails and the cause is not obvious, use the `systematic-debugging`
+  skill** — the 4-phase reproduce → isolate → hypothesize → fix loop — instead of
+  guess-and-check patching. On a retry brief (`-r<k>`) this is expected.
+- **Your diff may be independently reviewed.** On stages that touch a graded contract the
+  PM spawns a read-only `swe-reviewer` over your diff (via `scripts/review-package.sh`)
+  before the stage is accepted. Keep the diff in-lane and the handback honest — a
+  Critical/Important finding sends the stage back to a fresh executer.
 - **Obey every CLAUDE.md non-negotiable**, in particular: import-safety (`ENV4` — no
   side effects at import: no client/model/Chroma/store build, no file reads/writes);
   no raw `eval`/`exec`; no agent framework (LangGraph/LangChain/etc.); catalog accessed
