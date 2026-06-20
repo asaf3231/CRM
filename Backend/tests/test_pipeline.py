@@ -415,3 +415,53 @@ class TestCONN17GradedGateUntouched:
         text_1 = "shopify direct-to-consumer only"
         assert main.evaluate_icp_tags(text_3)["qualified"] is True
         assert main.evaluate_icp_tags(text_1)["qualified"] is False
+
+
+# ---------------------------------------------------------------------------
+# CONN22 — the real angle is persisted at qualify-time (C13)
+# ---------------------------------------------------------------------------
+
+class TestCONN22AnglePersisted:
+    """CONN22: a qualified catalog lead persists a real angle; the saved output carries the tier."""
+
+    def test_catalog_lead_persists_real_angle(self, monkeypatch):
+        import pipeline_runner
+        import crm_store
+        import api_seed
+
+        monkeypatch.setattr(
+            api_seed, "get_icp_document",
+            lambda: {"vertical": "Athleisure", "want_signals": [], "avoid_signals": [], "icp_tags": []},
+        )
+        _patch_chain(
+            monkeypatch,
+            fanout_domains=["aloyoga.com"],
+            profiles_by_domain={"aloyoga.com": _profile("aloyoga.com", 4)},
+        )
+        job = pipeline_runner.run_discovery(pipeline_runner.create_job())
+        assert job["saved"], "expected a catalog lead to be saved"
+
+        lead = next(l for l in crm_store.all_leads() if l["domain"] == "aloyoga.com")
+        assert isinstance(lead.get("angle"), dict), "real angle not persisted on the CRM record"
+        assert lead["angle"]["tier"] in (1, 2, 3, 4)
+        assert "angle_key" in lead["angle"]
+
+        s = job["saved"][0]
+        assert s["angleTier"] in (1, 2, 3, 4)
+        assert isinstance(s["angle"], str) and s["angle"]
+
+    def test_job_with_angle_has_no_secret(self, monkeypatch):
+        import pipeline_runner
+        import api_seed
+
+        monkeypatch.setattr(
+            api_seed, "get_icp_document",
+            lambda: {"vertical": "X", "want_signals": [], "avoid_signals": [], "icp_tags": []},
+        )
+        _patch_chain(
+            monkeypatch,
+            fanout_domains=["aloyoga.com"],
+            profiles_by_domain={"aloyoga.com": _profile("aloyoga.com", 4)},
+        )
+        job = pipeline_runner.run_discovery(pipeline_runner.create_job())
+        assert "corporate_access_key" not in json.dumps(job)

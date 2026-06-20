@@ -253,12 +253,25 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
             icp_sc = icp_score(prof, icp)            # per-lead ICP fit score [0,1] (C8 ranking)
             ctx = by_domain.get(domain, {}).get("catalog_context")
 
+            # Real RAG-matched solicitation angle (C13) — deterministic narrative from the lead's own
+            # fields, local match_solicitation_angle engine (no crawl, no keys). api_adapters is pure /
+            # import-safe (ENV4 lazy). Computed once; persisted on catalog leads + surfaced in the output.
+            import api_adapters  # lazy
+            angle = api_adapters.real_angle_for_record({
+                "company": (ctx or {}).get("Brand_Name", domain),
+                "profile": {"category_path": str((ctx or {}).get("Core_Category", "")).strip(), "icp_tags": signals},
+                "historical_social_incidents": int((ctx or {}).get("Historical_Social_Incidents", 0) or 0),
+                "icp_count": icp_count,
+            })
+
             qualified.append({
                 "domain": domain,
                 "company": (ctx or {}).get("Brand_Name", domain),
                 "icpCount": icp_count,
                 "icpFit": icp_fit,
                 "icpScore": icp_sc,
+                "angleTier": angle["tier"],
+                "angle": angle["title"],
                 "inCatalog": bool(ctx),
                 "tags": signals,
             })
@@ -285,6 +298,7 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
                     "historical_social_incidents": incidents,
                     "current_status": str(ctx["Current_Status"]).strip(),
                     "contact_ids": [],
+                    "angle": angle,  # real RAG-matched angle, persisted (C13) → drawer/list read this
                 }
                 crm_store.upsert_lead(record)
                 saved.append({
@@ -294,6 +308,8 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
                     "score": round(win_prob * 100),
                     "icpFit": icp_fit,
                     "icpScore": icp_sc,
+                    "angleTier": angle["tier"],
+                    "angle": angle["title"],
                 })
 
         # Rank by ICP fit score (desc) so the strongest-fit leads surface first (C8).
