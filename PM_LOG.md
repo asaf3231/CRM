@@ -746,3 +746,21 @@ Watch out for / open: (1) `gh` NOT authenticated → I can push but cannot `gh p
 (2) Combined commit spans two PM lanes (C4 mine + C6 the other PM's) per Asaf's explicit 16:43 decision — branch
 `feat/lead-detail-endpoint` now also carries C1/C2 + lead-detail + C4 + C6. (3) NEVER run the suite with
 `MONGO_URI` set. (4) Live C4 enablement puts real keys + paid runs on the public URL (token-gated).
+
+## 2026-06-20 17:15 — [BACKEND] SESSION START (fresh PM; post-C4/C6 merge)
+Picking up: backend is **feature-complete + DEPLOYED + CONNECTED + PERSISTENT on real data.** No PLAN.md
+stage is mid-flight. Read the spine in order (PM_Methodology → PM_LOG latest → CLAUDE → PLAN → QA families →
+NOTES latest → ORCHESTRATION protocol per CLAUDE §0.1).
+State as read (to re-verify before trusting any number): on the designated branch
+**`claude/pm-methodology-eelg1u`**, working tree CLEAN, HEAD **`ec04ba7`** = merge of **PR #4**
+(`52c0b37` C4 live ICP-driven discovery + C6 ICP durable substrate). So the concurrent C4/C6 work the
+16:38/17:00 entries flagged as uncommitted/interleaved is now **landed on `main` and merged here** — the
+HOLD is resolved. Stages 0–14 ✅, Phase 3 I0–I4 ✅ (I5 deferred), Phase 4 D0–D4 ✅, Phase 5 connection-plan
+**C0–C2 + C4(code) + C6 ✅**; C3/C5 plan-only. Last claimed offline baseline (NOTES C4 entry) = **796 passed
+/ 6 skipped / 0 failed** (`MONGO_URI` unset, mongomock) from cwd `Backend/` — **PLAN.md "Current project
+state" still reads 777, stale (pre-C4/C6 merge); doc-drift to reconcile.** Live stack: FE Vercel
+`crm-asaf6.vercel.app` ↔ BE Railway `backend-production-77e4.up.railway.app` ↔ Atlas `gtm_db` (9 real
+athleisure leads). C4 route live but 403 until the 4 Railway vars are set.
+Plan for this session: NOT advancing any stage unprompted. Await Asaf's pick from the standing open-items
+menu; re-verify the 796/6 baseline myself in `.venv` from `Backend/` before acting on any number. Stay in
+lane (no `frontend/`). Write a SESSION END before stopping.
