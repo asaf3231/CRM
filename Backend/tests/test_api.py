@@ -804,18 +804,23 @@ class TestINTG6IcpEndpoints:
             f"Expected 200, got {response.status_code}. Body: {response.text!r}"
         )
 
-    def test_get_icp_suggestions_equals_seed_want_signals(self):
-        """GET /api/icp/suggestions → == SEED_ICP['want_signals']."""
+    def test_get_icp_suggestions_additive_and_deterministic(self):
+        """GET /api/icp/suggestions → deterministic, additive phrases NOT in the ICP (C9 / CONN18).
+
+        Replaces the old contract (which echoed want_signals). Suggestions are now genuine
+        additions an operator hasn't picked yet.
+        """
         from fastapi.testclient import TestClient
         import api_server
         import api_seed
 
         with TestClient(api_server.app) as client:
-            response = client.get("/api/icp/suggestions")
-        data = response.json()
-        assert data == api_seed.SEED_ICP["want_signals"], (
-            f"Expected {api_seed.SEED_ICP['want_signals']!r}, got {data!r}"
-        )
+            a = client.get("/api/icp/suggestions").json()
+            b = client.get("/api/icp/suggestions").json()
+        assert a == b, "suggestions must be deterministic"
+        assert isinstance(a, list) and len(a) > 0, "suggestions must be non-empty for the seed ICP"
+        present = {s.lower() for s in api_seed.SEED_ICP["want_signals"]}
+        assert not (present & {s.lower() for s in a}), f"suggestions echo existing want_signals: {a}"
 
     def test_icp_doc_to_ui_qualification_criteria_want_is_high(self):
         """icp_doc_to_ui: each want_signal gets importance='High'."""
@@ -1315,17 +1320,21 @@ class TestCONN9IcpDurableSubstrate:
         # SEED_ICP constant is untouched by the edit (we copied on seed).
         assert api_seed.SEED_ICP["vertical"] == "Athleisure"
 
-    def test_conn9_suggestions_from_persisted_doc(self):
-        """/api/icp/suggestions reflects the persisted doc's want_signals, not the constant."""
+    def test_conn9_suggestions_reflect_persisted_doc(self):
+        """/api/icp/suggestions reads the PERSISTED doc: a phrase added to want_signals drops out (C9)."""
         from fastapi.testclient import TestClient
         import api_server
         import api_seed
 
         with TestClient(api_server.app) as client:
+            before = client.get("/api/icp/suggestions").json()
+            assert "Shopify storefront" in before, "expected a pool suggestion in the baseline"
+            # Persist it into want_signals → it must no longer be suggested (proves it reads the doc).
             api_seed.get_icp_collection().update_one(
-                {}, {"$set": {"want_signals": ["edited signal"]}}
+                {}, {"$set": {"want_signals": ["Shopify storefront"]}}
             )
-            assert client.get("/api/icp/suggestions").json() == ["edited signal"]
+            after = client.get("/api/icp/suggestions").json()
+        assert "Shopify storefront" not in after
 
     def test_conn9_empty_collection_falls_back_to_seed(self):
         """No lifespan → empty collection → /api/icp falls back to SEED_ICP (200, never empty)."""

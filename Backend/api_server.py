@@ -247,14 +247,14 @@ async def get_icp() -> dict:
 
 @app.get("/api/icp/suggestions")
 async def get_icp_suggestions() -> list:
-    """INTG6 / CONN9: GET /api/icp/suggestions → list[str].
+    """INTG6 / CONN9 / CONN18: GET /api/icp/suggestions → list[str].
 
-    Returns the want_signals from the persisted ICP document (not the static
-    SEED_ICP constant). api_seed imported lazily.
+    Returns DETERMINISTIC, additive ICP keyword suggestions — phrases NOT already in the
+    active ICP (no LLM / no keys). Reflects the persisted doc (api_seed.icp_suggestions).
     """
     import api_seed  # lazy
 
-    return api_seed.get_icp_document().get("want_signals", [])
+    return api_seed.icp_suggestions()
 
 
 @app.put("/api/icp")

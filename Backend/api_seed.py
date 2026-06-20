@@ -469,3 +469,49 @@ def upsert_icp_document(fields: dict) -> dict:
     doc["icp_id"] = _ICP_DOC_ID
     get_icp_collection().replace_one({"icp_id": _ICP_DOC_ID}, doc, upsert=True)
     return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}
+
+
+# Deterministic ICP suggestion pool (C9 / CONN18) — domain-relevant want-signal phrases an
+# operator might add to sharpen the ICP. KEY-FREE (no LLM): the endpoint returns the pool
+# entries NOT already present in the active ICP. Order is stable (pool order).
+_ICP_SUGGESTION_POOL = [
+    "high ad spend",
+    "active social presence",
+    "DTC brand",
+    "strong influencer marketing",
+    "ecommerce-first",
+    "TikTok pixel installed",
+    "Meta pixel installed",
+    "Google Tag Manager",
+    "performance marketing team",
+    "venture-backed growth stage",
+    "deep product catalog",
+    "recent PR or brand-safety incident",
+    "Shopify storefront",
+    "retargeting campaigns",
+    "rapid revenue growth",
+]
+
+
+def icp_suggestions(limit: int = 8) -> list:
+    """Deterministic ICP keyword suggestions (C9 / CONN18) — ADDITIVE want-signal phrases that
+    are NOT already in the active ICP (replaces the old behaviour that just echoed want_signals).
+
+    No LLM / no keys: drawn from the curated `_ICP_SUGGESTION_POOL` and de-duped (case-insensitive)
+    against the active ICP's `want_signals` + humanized `icp_tags`. Reads the persisted doc via
+    get_icp_document(), so it reflects edits. Stable order, capped at `limit`.
+
+    Returns:
+        list[str] — up to `limit` suggested additions not yet in the ICP.
+    """
+    icp = get_icp_document()
+    present = {str(v).strip().lower() for v in (icp.get("want_signals") or [])}
+    present |= {str(v).replace("_", " ").strip().lower() for v in (icp.get("icp_tags") or [])}
+
+    out = []
+    for phrase in _ICP_SUGGESTION_POOL:
+        if phrase.strip().lower() not in present:
+            out.append(phrase)
+        if len(out) >= limit:
+            break
+    return out
