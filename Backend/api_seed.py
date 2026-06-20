@@ -38,12 +38,15 @@ SEED_ICP: dict = {
     "geo": "North America",
     "size_band": "Mid-Market",
     "icp_tags": [
-        "high_ad_spend",
-        "social_presence",
-        "dtc_brand",
-        "influencer_marketing",
-        "ecommerce",
-        "brand_safety_risk",
+        # Canonical _ICP_TAGS keys (== main._ICP_TAGS / the crawler's
+        # operational_scale_signals) so the pipeline_runner icp_fit overlay actually
+        # overlaps the live crawl signals instead of always scoring 0 (C8).
+        "ecommerce_dtc",
+        "paid_social_advertising",
+        "ad_spend_signals",
+        "pixel_tracking_present",
+        "brand_marketing_team",
+        "crisis_reputation_risk",
     ],
     "anchor_companies": [
         {"name": "FlowFit Apparel", "domain": "flowfitapparel.com", "why": "DTC athleisure leader with heavy TikTok spend and recent PR incident"},

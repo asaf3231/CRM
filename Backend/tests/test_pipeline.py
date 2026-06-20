@@ -285,3 +285,133 @@ class TestCONN12Gating:
         )
         job = pipeline_runner.run_discovery(pipeline_runner.create_job())
         assert "corporate_access_key" not in json.dumps(job)
+
+
+# ---------------------------------------------------------------------------
+# CONN15 — the full ICP shapes the search queries (deterministic, no keys)
+# ---------------------------------------------------------------------------
+
+class TestCONN15IcpDrivesQueries:
+    """CONN15: every ICP field (vertical/want/tags/geo/size) shapes compose_icp_query_terms."""
+
+    def test_full_icp_fields_appear_in_seed(self):
+        import pipeline_runner
+
+        seed = pipeline_runner.compose_icp_query_terms({
+            "vertical": "Athleisure", "want_signals": ["high ad spend"],
+            "icp_tags": ["ecommerce_dtc"], "geo": "North America", "size_band": "Mid-Market",
+        })
+        assert "Athleisure" in seed
+        assert "high ad spend" in seed
+        assert "ecommerce dtc" in seed          # humanized canonical tag
+        assert "North America" in seed
+        assert "Mid-Market" in seed
+
+    def test_changing_an_icp_field_changes_the_seed(self):
+        import pipeline_runner
+
+        base = {"vertical": "X", "want_signals": [], "icp_tags": [], "geo": "Europe", "size_band": ""}
+        assert (
+            pipeline_runner.compose_icp_query_terms(base)
+            != pipeline_runner.compose_icp_query_terms({**base, "geo": "APAC"})
+        )
+        assert (
+            pipeline_runner.compose_icp_query_terms(base)
+            != pipeline_runner.compose_icp_query_terms({**base, "icp_tags": ["pixel_tracking_present"]})
+        )
+
+    def test_empty_icp_falls_back(self):
+        import pipeline_runner
+        assert pipeline_runner.compose_icp_query_terms({}) == "ecommerce DTC brands"
+
+
+# ---------------------------------------------------------------------------
+# CONN16 — the ICP actually affects scoring (icp_fit > 0; icp_score ranking)
+# ---------------------------------------------------------------------------
+
+class TestCONN16IcpScoringIsReal:
+    """CONN16: canonicalized icp_tags overlap the crawl signals (was always 0 pre-C8)."""
+
+    def test_seed_icp_tags_now_overlap_crawl_signals(self):
+        """The default SEED_ICP icp_tags are canonical → overlap a crawl that surfaced them."""
+        import pipeline_runner
+        import api_seed
+
+        icp_tags = set(pipeline_runner.canonicalize_icp_tags(api_seed.SEED_ICP["icp_tags"]))
+        crawl_signals = {"ecommerce_dtc", "ad_spend_signals", "scale_growth_stage"}
+        assert len(crawl_signals & icp_tags) >= 2, "SEED_ICP tags must overlap canonical crawl signals (C8)"
+
+    def test_canonicalize_maps_legacy_aliases(self):
+        import pipeline_runner
+
+        out = pipeline_runner.canonicalize_icp_tags(["dtc_brand", "high ad spend", "ecommerce"])
+        assert "ecommerce_dtc" in out
+        assert "ad_spend_signals" in out
+
+    def test_canonicalize_passes_through_unknowns(self):
+        """Explicit/unknown signal names survive (so nothing is silently dropped)."""
+        import pipeline_runner
+        assert pipeline_runner.canonicalize_icp_tags(["sig_0", "sig_1"]) == ["sig_0", "sig_1"]
+
+    def test_icp_score_rewards_overlap_penalizes_avoid_and_is_bounded(self):
+        import pipeline_runner
+
+        icp = {"icp_tags": ["ecommerce_dtc", "ad_spend_signals"], "avoid_signals": ["wholesale marketplace"]}
+        sig = ["ecommerce_dtc", "ad_spend_signals", "pixel_tracking_present"]
+        good = {"operational_scale_signals": sig, "title": "A DTC brand", "description": ""}
+        bad = {"operational_scale_signals": sig, "title": "A wholesale marketplace", "description": ""}
+        assert pipeline_runner.icp_score(good, icp) > pipeline_runner.icp_score(bad, icp)
+        assert 0.0 <= pipeline_runner.icp_score(good, icp) <= 1.0
+
+    def test_run_discovery_ranks_qualified_by_icp_score(self, monkeypatch):
+        import pipeline_runner
+        import api_seed
+
+        monkeypatch.setattr(
+            api_seed, "get_icp_document",
+            lambda: {"vertical": "X", "want_signals": [], "avoid_signals": [],
+                     "icp_tags": ["sig_0", "sig_1", "sig_2"]},
+        )
+        _patch_chain(
+            monkeypatch,
+            fanout_domains=["a.com", "b.com"],
+            profiles_by_domain={
+                "a.com": _profile("a.com", 3),  # signals sig_0,1,2 → overlap 3
+                "b.com": _profile("b.com", 3, operational_scale_signals=["sig_0", "z1", "z2"]),  # overlap 1
+            },
+        )
+        job = pipeline_runner.run_discovery(pipeline_runner.create_job())
+        scores = [q["icpScore"] for q in job["qualified"]]
+        assert scores == sorted(scores, reverse=True), f"qualified not ranked by icpScore: {scores}"
+        assert all("icpScore" in q for q in job["qualified"])
+
+
+# ---------------------------------------------------------------------------
+# CONN17 — graded contract byte-stable (C8 touches only ICP-side data/logic)
+# ---------------------------------------------------------------------------
+
+class TestCONN17GradedGateUntouched:
+    """CONN17: C8 does NOT change the graded gate — main.py untouched (ICPB5 / Policy 2)."""
+
+    def test_icp_tag_threshold_unchanged(self):
+        import main
+        assert main.ICP_TAG_THRESHOLD == 3
+
+    def test_tool_count_still_10(self):
+        import main
+        assert len(main.TOOL_SCHEMAS) == 10
+        assert len(main.TOOL_DISPATCH) == 10
+
+    def test_alias_targets_are_subset_of_graded_vocab(self):
+        """Every canonicalization target is a real _ICP_TAGS key (keeps them in sync)."""
+        import main
+        import pipeline_runner
+        assert set(pipeline_runner._ICP_TAG_ALIASES.values()) <= set(main._ICP_TAGS.keys())
+
+    def test_evaluate_icp_tags_gate_behaviour_intact(self):
+        """The graded ≥3 gate still passes >=3 distinct tags and fails <3."""
+        import main
+        text_3 = "shopify direct-to-consumer ; facebook ads tiktok ads ; series a venture-backed"
+        text_1 = "shopify direct-to-consumer only"
+        assert main.evaluate_icp_tags(text_3)["qualified"] is True
+        assert main.evaluate_icp_tags(text_1)["qualified"] is False

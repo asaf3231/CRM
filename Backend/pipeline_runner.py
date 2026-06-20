@@ -83,11 +83,26 @@ def get_job(job_id: str) -> dict | None:
     return doc
 
 
-def _compose_seed(icp: dict) -> str:
-    """Compose a discovery seed from the ICP's vertical + want_signals."""
+def compose_icp_query_terms(icp: dict) -> str:
+    """Compose the discovery seed from the FULL ICP so every dimension shapes the search
+    queries (SLED "ICP keywords → queries"): vertical + want_signals + icp_tags (humanized)
+    + size_band + geo. Replaces the old vertical+want_signals-only seed (C8). Returns a
+    single seed string — the same type main.generate_search_queries expects."""
     vertical = str(icp.get("vertical", "") or "").strip()
     wants = [str(w).strip() for w in (icp.get("want_signals") or []) if isinstance(w, str) and w.strip()]
-    parts = [p for p in [vertical, ", ".join(wants)] if p]
+    tags = [str(t).replace("_", " ").strip() for t in (icp.get("icp_tags") or []) if str(t).strip()]
+    geo = str(icp.get("geo", "") or "").strip()
+    size = str(icp.get("size_band", "") or "").strip()
+    parts = []
+    if vertical:
+        parts.append(vertical)
+    if wants:
+        parts.append(", ".join(wants))
+    if tags:
+        parts.append(", ".join(tags))
+    qualifiers = " ".join(p for p in [size, geo] if p)
+    if qualifiers:
+        parts.append(qualifiers)
     return " — ".join(parts) if parts else "ecommerce DTC brands"
 
 
@@ -108,6 +123,59 @@ def _matches_avoid(text: str, avoid_signals: list) -> bool:
         if len(words) >= 2 and all(w in t for w in words):
             return True
     return False
+
+
+# Alias map: free-text / legacy ICP tag strings → canonical _ICP_TAGS keys (== the crawler's
+# operational_scale_signals vocabulary in main._ICP_TAGS). We NEVER import or modify _ICP_TAGS
+# here — CONN17 asserts these targets stay a subset of it, so the graded gate
+# (evaluate_icp_tags / ICP_TAG_THRESHOLD) is untouched (ICPB5 / Policy 2).
+_ICP_TAG_ALIASES = {
+    "dtc": "ecommerce_dtc", "dtc_brand": "ecommerce_dtc", "ecommerce": "ecommerce_dtc",
+    "ecommerce_first": "ecommerce_dtc", "shopify": "ecommerce_dtc", "direct_to_consumer": "ecommerce_dtc",
+    "high_ad_spend": "ad_spend_signals", "ad_spend": "ad_spend_signals", "paid_media": "ad_spend_signals",
+    "media_budget": "ad_spend_signals",
+    "social_presence": "paid_social_advertising", "active_social_presence": "paid_social_advertising",
+    "influencer_marketing": "paid_social_advertising", "strong_influencer_marketing": "paid_social_advertising",
+    "paid_social": "paid_social_advertising",
+    "pixel": "pixel_tracking_present", "pixels": "pixel_tracking_present", "tracking_pixel": "pixel_tracking_present",
+    "marketing_team": "brand_marketing_team", "brand_team": "brand_marketing_team",
+    "growth_stage": "scale_growth_stage", "scaling": "scale_growth_stage", "venture_backed": "scale_growth_stage",
+    "product_catalog": "product_catalogue_depth", "catalogue": "product_catalogue_depth",
+    "catalog_depth": "product_catalogue_depth",
+    "brand_safety_risk": "crisis_reputation_risk", "reputation_risk": "crisis_reputation_risk",
+}
+
+
+def canonicalize_icp_tags(tags) -> list:
+    """Normalize free-text/legacy ICP tag strings → canonical _ICP_TAGS keys so the ICP overlay
+    actually overlaps the crawler's operational_scale_signals (which ARE _ICP_TAGS keys). Known
+    aliases map to a canonical key; everything else passes through normalized (lowercased,
+    spaces/hyphens → underscores) so explicit signal names still work and nothing is silently
+    dropped. De-dups, order-preserving. Pure string fn — no network, no _ICP_TAGS mutation."""
+    out = []
+    for t in tags or []:
+        key = str(t).strip().lower().replace(" ", "_").replace("-", "_")
+        if not key:
+            continue
+        out.append(_ICP_TAG_ALIASES.get(key, key))
+    seen = set()
+    return [k for k in out if not (k in seen or seen.add(k))]
+
+
+def icp_score(profile: dict, icp: dict) -> float:
+    """Per-lead ICP fit score in [0,1] — a RANKING/overlay signal, NOT the pass/fail gate (the
+    >=ICP_TAG_THRESHOLD graded gate stays the pass/fail, Policy 2). Deterministic blend:
+        0.6 · min(#crawl signals, 5)/5      — how strongly the crawl fits the ICP, and
+        0.4 · min(#icp_tag overlap, 3)/3    — canonical icp_tags present in the crawl signals
+        − 0.25 if an ICP avoid_signal matches the page text.
+    No network; no _ICP_TAGS mutation."""
+    signals = set(profile.get("operational_scale_signals", []) or [])
+    icp_tags = set(canonicalize_icp_tags(icp.get("icp_tags")))
+    text = f"{profile.get('title', '')} {profile.get('description', '')}"
+    signal_component = min(len(signals), 5) / 5.0
+    overlap_component = (min(len(signals & icp_tags), 3) / 3.0) if icp_tags else 0.0
+    penalty = 0.25 if _matches_avoid(text, icp.get("avoid_signals", []) or []) else 0.0
+    return round(max(0.0, min(1.0, 0.6 * signal_component + 0.4 * overlap_component - penalty)), 4)
 
 
 def _resolve_catalog_path() -> str:
@@ -137,8 +205,8 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
         if not icp:
             icp = getattr(api_seed, "SEED_ICP", {}) or {}
         avoid_signals = icp.get("avoid_signals", []) or []
-        icp_tags = {str(t) for t in (icp.get("icp_tags") or [])}
-        seed = (seed_override or "").strip() or _compose_seed(icp)
+        icp_tags = set(canonicalize_icp_tags(icp.get("icp_tags")))  # canonical → real overlap (C8)
+        seed = (seed_override or "").strip() or compose_icp_query_terms(icp)
 
         # 2) Search queries from the ICP-derived seed.
         _update_job(job_id, stage="queries", seed=seed)
@@ -182,6 +250,7 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
                 continue
             pixel_count = sum(1 for k in ("tiktok_pixel", "meta_pixel", "gtm") if prof.get(k))
             icp_fit = len(set(signals) & icp_tags)  # ICP overlay (ranking signal, not a pass/fail)
+            icp_sc = icp_score(prof, icp)            # per-lead ICP fit score [0,1] (C8 ranking)
             ctx = by_domain.get(domain, {}).get("catalog_context")
 
             qualified.append({
@@ -189,6 +258,7 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
                 "company": (ctx or {}).get("Brand_Name", domain),
                 "icpCount": icp_count,
                 "icpFit": icp_fit,
+                "icpScore": icp_sc,
                 "inCatalog": bool(ctx),
                 "tags": signals,
             })
@@ -223,8 +293,12 @@ def run_discovery(job_id: str, seed_override: str | None = None, max_domains: in
                     "domain": domain,
                     "score": round(win_prob * 100),
                     "icpFit": icp_fit,
+                    "icpScore": icp_sc,
                 })
 
+        # Rank by ICP fit score (desc) so the strongest-fit leads surface first (C8).
+        qualified.sort(key=lambda q: q.get("icpScore", 0), reverse=True)
+        saved.sort(key=lambda s: s.get("icpScore", 0), reverse=True)
         _update_job(job_id, stage="persist", qualified=qualified, saved=saved)
         _update_job(job_id, status="done", stage="done")
     except Exception as exc:  # noqa: BLE001 — failures are data, never crash the worker
