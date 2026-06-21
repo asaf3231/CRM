@@ -1688,3 +1688,67 @@ next step (deferred pending Asaf's go-ahead; FE lane).
 (new), `Backend/tests/conftest.py` (`_jobs_collection` reset); spine: `backend_connection_plan.md` (C4),
 `QA_checklist.md` §13 (CONN7/11/12).
 **Source:** PM `.venv` runs + live Railway deploy (route confirmed live: `POST` → 403) this session.
+
+---
+
+## 2026-06-20 — Phase 6 "Real ICP" (C7–C10): authoring + ICP-driven discovery — handback
+**Type:** Handback (PM, implemented inline + verified)
+**Context:** Asaf asked "is the ICP real / does it affect anything?" Audit found it was a real DB object with
+**frozen, placeholder contents and ~zero effect**: read-only (no write path / no FE Save), the seed used only
+vertical+want_signals, and `icp_fit` overlapped two **disjoint** vocabularies (`SEED_ICP.icp_tags` "dtc_brand"…
+vs the crawler's `_ICP_TAGS` keys) → always 0. Asaf: do everything to make it real + drive the search, **except
+the 4 live vars** (`ANTHROPIC`/`FIRECRAWL`/`ENABLE_LIVE`/`DISCOVERY_TOKEN`) — full-stack, deep. SLED reference
+(`GTM_Engine_KB_SLED_AI.md` §L1–2): *ICP = structured constraints + a keyword set; the keywords bridge to search.*
+**What landed (branch `feat/icp-real-driving-search`; per-stage commits):**
+- **C7** `PUT /api/icp` write path — `api_seed.upsert_icp_document` (merge-preserve), `api_adapters.ui_to_icp_doc`
+  (reverse) + `icp_doc_to_ui` now emits `sizeBand`/`icpTags` (lossless round-trip). `CONN13`/`CONN14`. (`5e7ca3f`)
+- **C8** ICP actually drives discovery — `compose_icp_query_terms` folds the FULL ICP into the seed;
+  `canonicalize_icp_tags` + `_ICP_TAG_ALIASES` realign ICP tags → canonical `_ICP_TAGS` keys so `icp_fit` is real;
+  `SEED_ICP.icp_tags` → canonical; `icp_score` per-lead ranking. **`main.py` 0-diff** (graded gate byte-stable,
+  ICPB5/Policy 2). `CONN15`–`CONN17`. (`54ec418`)
+- **C9** `/api/icp/suggestions` now deterministic + additive (key-free pool, excludes present tags) instead of
+  echoing want_signals. `CONN18`. (`27f118b`)
+- **C10** FE ICP Builder **Save** button (was absent — edits died on reload) + `sizeBand`/`icpTags` editors +
+  removed hardcoded SLED-tender fields; `api.ts` `putJSON`/`saveIcpDocument`; `IcpDocument` +`sizeBand`/`icpTags`.
+  `CONN19`. (`40acb39`)
+**Verified (PM):** offline suite **816 passed / 6 skipped / 0 failed** (`MONGO_URI` unset). `main.py` 0-diff vs HEAD;
+threshold 3, tools 10/10. **Live (uvicorn + Preview-MCP):** PUT edit persists + merge-preserves keywords; `icpTags`
+serves the canonical vocab; suggestions additive; **UI edit → Save → reload → "UI Edited ICP" persists** (the
+headline — edits no longer die on reload). `tsc --noEmit` clean.
+**Decisions:** single active ICP (edit-in-place, `icp_id="active"`); the vocabulary fix is done on the **ICP-data
+side** (SEED_ICP + alias map), NOT by touching graded `_ICP_TAGS`; `icp_score` is ranking-only (the ≥3 gate stays
+pass/fail). **Out of scope (the 4 vars):** LLM `build_icp_document` synthesis + live discovery runs — built-ready,
+key-gated.
+**Source:** PM inline implementation + `.venv` pytest + live uvicorn/curl/Preview-MCP, this session.
+
+---
+
+## 2026-06-20 — Phase 7 "Real Solicitation Angle" (C12–C15, SLED Layer 4) — handback
+**Type:** Handback (PM, implemented inline + verified)
+**Context:** After the ICP went real (Phase 6), Asaf re-issued "make it real, not the 4 vars, full plan." Next
+target = SLED **Layer 4 (the outreach value-hook / "most important part")**. Same pattern as the ICP, one stage
+downstream: the **real** `match_solicitation_angle` RAG engine ([main.py:951]; Chroma+BM25+RRF over
+`angle_corpus.json` — **fully local, no keys**) existed, but the live pipeline computed no angle, the CRM stored
+none, and the API served a **win-prob heuristic** (`_derive_angle` → 3 canned titles). **Key insight:** the engine
+takes ANY narrative string (the code's "needs a live crawl" belief was wrong) — a narrative composed
+deterministically from the lead's catalog/ICP fields yields a real angle with no Firecrawl/keys.
+**What landed (branch `feat/icp-real-driving-search`, stacked on Phase 6; per-stage commits):**
+- **C12** (`846bdad`) `compose_angle_narrative` + `real_angle_for_record` (calls `match_solicitation_angle` lazily)
+  → real corpus `angle_key` + RRF tier + rationale; Tier 4 → "No strong angle yet"; replaced `_derive_angle` in
+  `crm_lead_to_detail` (persisted-or-computed).
+- **C13** (`fe96ba8`) `pipeline_runner.run_discovery` + `ingest_real_leads.py` persist `record["angle"]` at
+  qualify-time + surface `angleTier`/`angle` in the discovery output.
+- **C14** (`d7fb6dd`) `crm_lead_to_ui` emits `angleTier`; FE `Lead` +`angleTier` + an Angle/Tier chip column in
+  `LeadTable`; the drawer already renders the real angle (unchanged).
+- **C15** spine: QA §13 CONN20–23, connection-plan C12–C15 + Phase-7 summary, this handback, PM_LOG.
+**Verified (PM):** offline suite **825 passed / 6 skipped / 0 failed**; graded engine **0-diff** vs origin/main
+(`main.py`/`rag_engine.py`/`angle_corpus.json`); tool count 10; `match_solicitation_angle` still the dispatch
+entry. **Live (uvicorn + curl + Preview-MCP):** `GET /api/leads/seed-lead-001` → real angle **"Crisis: Pr
+Reputation" Tier 1 (angle_key `crisis_pr_reputation_002`, RRF 0.0318)** — NOT the old heuristic; the `/leads`
+table renders the Angle column (seed leads → "—" since no persisted angle); drawer wiring intact
+(`onRowClick`→`LeadDetailDrawer`, fetches the real-angle endpoint); `tsc --noEmit` clean.
+**Decisions:** the graded RAG engine is **CALLED, never modified** (no corpus expansion — that would risk the
+graded `test_rag.py` tier assertions; flagged optional/deferred); narrative is catalog/ICP-derived (Policy 1, no
+invented facts); Tier 4 → honest no-angle (Policy 6 spirit). **Out of scope (the 4 vars):** live-crawl-derived
+narratives (Firecrawl) + LLM angle generation.
+**Source:** PM inline implementation + `.venv` pytest + live uvicorn/curl/Preview-MCP, this session.

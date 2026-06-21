@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Users,
@@ -10,15 +10,15 @@ import {
   FileText,
   Sparkles,
   ChevronDown,
+  Save,
+  Check,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGtmStore } from "@/store/useGtmStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { TagChip } from "@/components/tags/TagChip";
 import { TagInput } from "@/components/tags/TagInput";
@@ -120,60 +120,13 @@ function ConfigPanel({
         </p>
       </div>
 
-      {/* Qualification criteria */}
-      <SectionLabel>Qualification Criteria</SectionLabel>
-
-      <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Geography</FieldLabel>
-            <Select defaultValue="nationwide">
-              <option value="nationwide">Nationwide</option>
-              <option value="regional">Regional</option>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <FieldLabel>State match type</FieldLabel>
-            <Select defaultValue="any">
-              <option value="any">Any office</option>
-              <option value="hq">HQ only</option>
-            </Select>
-          </div>
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-2">
-          <Checkbox defaultChecked />
-          <span className="text-sm">Require US office</span>
-        </label>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Government experience</FieldLabel>
-            <Select defaultValue="any">
-              <option value="any">Any</option>
-              <option value="required">Required</option>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Offering type</FieldLabel>
-            <Select defaultValue="any">
-              <option value="any">Any</option>
-              <option value="services">Services</option>
-              <option value="products">Products</option>
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Min team size</FieldLabel>
-            <Input type="number" defaultValue={30} min={0} className="h-9" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Max team size</FieldLabel>
-            <Input type="text" placeholder="No max" className="h-9" />
-          </div>
-        </div>
+      {/* Targeting note — the real, persisted ICP fields are edited in the main panel
+          (Keywords / ICP Tags / Geographic Focus / Size Band) and persist on Save. */}
+      <SectionLabel>Targeting</SectionLabel>
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-[11px] leading-snug text-muted-foreground">
+        Geography, size band, ICP tags and keywords are edited in the main panel and persist when you
+        click <span className="font-medium text-foreground">Save</span>. Disqualifiers use the{" "}
+        <span className="font-medium text-foreground">"Avoid: …"</span> prefix in Qualification Criteria.
       </div>
 
       {/* Preferred customer segments */}
@@ -218,8 +171,16 @@ interface CenterPanelProps {
   geographicFocus: string[];
   onAddGeo: (t: string) => void;
   onRemoveGeo: (t: string) => void;
+  sizeBand: string;
+  onSizeBandChange: (v: string) => void;
+  icpTags: string[];
+  onAddIcpTag: (t: string) => void;
+  onRemoveIcpTag: (t: string) => void;
   criteria: CriterionRow[];
   onCriterionChange: (idx: number, field: keyof CriterionRow, value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  saved: boolean;
 }
 
 function CenterPanel({
@@ -234,8 +195,16 @@ function CenterPanel({
   geographicFocus,
   onAddGeo,
   onRemoveGeo,
+  sizeBand,
+  onSizeBandChange,
+  icpTags,
+  onAddIcpTag,
+  onRemoveIcpTag,
   criteria,
   onCriterionChange,
+  onSave,
+  saving,
+  saved,
 }: CenterPanelProps) {
   const [editingTitle, setEditingTitle] = useState(false);
 
@@ -267,6 +236,10 @@ function CenterPanel({
             </button>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" onClick={onSave} disabled={saving}>
+              {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+              {saving ? "Saving…" : saved ? "Saved" : "Save"}
+            </Button>
             <Button variant="outline" size="sm">
               <Copy className="h-4 w-4" /> Copy
             </Button>
@@ -342,23 +315,29 @@ function CenterPanel({
                 </div>
               </div>
 
-              {/* Company Size Range */}
-              <div className="flex flex-col gap-3">
-                <div className="text-sm font-semibold">Company Size Range</div>
-                <div className="flex items-center gap-3">
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel>Min Employees</FieldLabel>
-                    <Input type="number" defaultValue={30} className="w-28" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel>Max Employees</FieldLabel>
-                    <Input type="number" placeholder="No max" className="w-28" />
-                  </div>
-                  <label className="ml-2 flex cursor-pointer items-center gap-2 self-end pb-1">
-                    <Checkbox defaultChecked />
-                    <span className="text-sm">No size constraint</span>
-                  </label>
-                </div>
+              {/* ICP Tags — the canonical signals that drive per-lead scoring (C8 / C10) */}
+              <TagGroup
+                label="ICP Tags (drive lead scoring)"
+                tags={icpTags}
+                onAdd={onAddIcpTag}
+                onRemove={onRemoveIcpTag}
+                placeholder="e.g. ecommerce_dtc, paid_social_advertising, ad_spend_signals"
+                helper="Canonical signals matched against each crawled lead — press Enter or comma to add"
+              />
+
+              {/* Company size band — folded into the discovery seed */}
+              <div className="flex flex-col gap-1.5">
+                <div className="text-sm font-semibold">Company Size Band</div>
+                <Select
+                  value={sizeBand}
+                  onChange={(e) => onSizeBandChange(e.target.value)}
+                  className="w-56"
+                >
+                  <option value="">Any size</option>
+                  <option value="SMB">SMB</option>
+                  <option value="Mid-Market">Mid-Market</option>
+                  <option value="Enterprise">Enterprise</option>
+                </Select>
               </div>
 
               {/* Qualification Criteria */}
@@ -551,6 +530,7 @@ function SourceBtn({
 /* ─── Root page ───────────────────────────────────────────────── */
 export function IcpBuilder() {
   const { tagVocabulary, addTag, removeTag, setTagVocabulary } = useGtmStore();
+  const queryClient = useQueryClient();
 
   const icpQuery = useQuery({ queryKey: ["icpDocument"], queryFn: api.getIcpDocument });
 
@@ -574,6 +554,25 @@ export function IcpBuilder() {
   const [preferredSegments, setPreferredSegments] = useState<string[]>([]);
   const [preferredCerts, setPreferredCerts] = useState<string[]>([]);
   const [criteria, setCriteria] = useState<CriterionRow[]>([]);
+  const [sizeBand, setSizeBand] = useState<string>("");
+  const [icpTags, setIcpTags] = useState<string[]>([]);
+
+  // Persist the edited ICP to the backend (PUT /api/icp); re-fetch on success.
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.saveIcpDocument({
+        title,
+        keywords: tagVocabulary,
+        geographicFocus,
+        sizeBand,
+        icpTags,
+        qualificationCriteria: criteria.map((c) => ({
+          criterion: c.criterion,
+          importance: c.weight,
+        })),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["icpDocument"] }),
+  });
 
   // Once doc loads, seed local state
   useEffect(() => {
@@ -582,6 +581,8 @@ export function IcpBuilder() {
       setDescription(icpQuery.data.description);
       setIndustryVerticals(icpQuery.data.industryVerticals);
       setGeographicFocus(icpQuery.data.geographicFocus);
+      setSizeBand(icpQuery.data.sizeBand ?? "");
+      setIcpTags(icpQuery.data.icpTags ?? []);
       setCriteria(
         icpQuery.data.qualificationCriteria.map((c) => ({
           criterion: c.criterion,
@@ -652,8 +653,16 @@ export function IcpBuilder() {
         geographicFocus={geographicFocus}
         onAddGeo={(t) => setGeographicFocus((p) => [...p, t])}
         onRemoveGeo={(t) => setGeographicFocus((p) => p.filter((x) => x !== t))}
+        sizeBand={sizeBand}
+        onSizeBandChange={setSizeBand}
+        icpTags={icpTags}
+        onAddIcpTag={(t) => setIcpTags((p) => (p.includes(t) ? p : [...p, t]))}
+        onRemoveIcpTag={(t) => setIcpTags((p) => p.filter((x) => x !== t))}
         criteria={criteria}
         onCriterionChange={handleCriterionChange}
+        onSave={() => saveMutation.mutate()}
+        saving={saveMutation.isPending}
+        saved={saveMutation.isSuccess}
       />
 
       <SuggestionsRail onAccept={addTag} />

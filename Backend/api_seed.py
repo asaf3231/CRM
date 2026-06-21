@@ -38,12 +38,15 @@ SEED_ICP: dict = {
     "geo": "North America",
     "size_band": "Mid-Market",
     "icp_tags": [
-        "high_ad_spend",
-        "social_presence",
-        "dtc_brand",
-        "influencer_marketing",
-        "ecommerce",
-        "brand_safety_risk",
+        # Canonical _ICP_TAGS keys (== main._ICP_TAGS / the crawler's
+        # operational_scale_signals) so the pipeline_runner icp_fit overlay actually
+        # overlaps the live crawl signals instead of always scoring 0 (C8).
+        "ecommerce_dtc",
+        "paid_social_advertising",
+        "ad_spend_signals",
+        "pixel_tracking_present",
+        "brand_marketing_team",
+        "crisis_reputation_risk",
     ],
     "anchor_companies": [
         {"name": "FlowFit Apparel", "domain": "flowfitapparel.com", "why": "DTC athleisure leader with heavy TikTok spend and recent PR incident"},
@@ -444,3 +447,71 @@ def get_icp_document() -> dict:
     if not doc:
         return dict(SEED_ICP)  # resilient fallback — never empty/500
     return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}
+
+
+def upsert_icp_document(fields: dict) -> dict:
+    """Merge storage-shaped `fields` onto the active ICP doc and persist (CONN13).
+
+    Merge-preserve: any storage field NOT present in `fields` keeps its existing stored
+    value, so a partial edit from the UI never drops anchors/tags it didn't send. Stamps
+    the stable `icp_id` and upserts the single active doc. The ICP has NO private contact
+    fields, so no Policy-4 gate is involved and no corporate_access_key is ever written.
+
+    Args:
+        fields: storage-shaped ICP fields to merge (a subset of the SEED_ICP keys).
+
+    Returns:
+        The saved ICP doc (SEED_ICP-shaped, without `_id`/`icp_id`).
+    """
+    current = get_icp_document()              # existing active doc, or SEED_ICP fallback
+    merged = {**current, **(fields or {})}
+    doc = dict(merged)
+    doc["icp_id"] = _ICP_DOC_ID
+    get_icp_collection().replace_one({"icp_id": _ICP_DOC_ID}, doc, upsert=True)
+    return {k: v for k, v in doc.items() if k not in ("_id", "icp_id")}
+
+
+# Deterministic ICP suggestion pool (C9 / CONN18) — domain-relevant want-signal phrases an
+# operator might add to sharpen the ICP. KEY-FREE (no LLM): the endpoint returns the pool
+# entries NOT already present in the active ICP. Order is stable (pool order).
+_ICP_SUGGESTION_POOL = [
+    "high ad spend",
+    "active social presence",
+    "DTC brand",
+    "strong influencer marketing",
+    "ecommerce-first",
+    "TikTok pixel installed",
+    "Meta pixel installed",
+    "Google Tag Manager",
+    "performance marketing team",
+    "venture-backed growth stage",
+    "deep product catalog",
+    "recent PR or brand-safety incident",
+    "Shopify storefront",
+    "retargeting campaigns",
+    "rapid revenue growth",
+]
+
+
+def icp_suggestions(limit: int = 8) -> list:
+    """Deterministic ICP keyword suggestions (C9 / CONN18) — ADDITIVE want-signal phrases that
+    are NOT already in the active ICP (replaces the old behaviour that just echoed want_signals).
+
+    No LLM / no keys: drawn from the curated `_ICP_SUGGESTION_POOL` and de-duped (case-insensitive)
+    against the active ICP's `want_signals` + humanized `icp_tags`. Reads the persisted doc via
+    get_icp_document(), so it reflects edits. Stable order, capped at `limit`.
+
+    Returns:
+        list[str] — up to `limit` suggested additions not yet in the ICP.
+    """
+    icp = get_icp_document()
+    present = {str(v).strip().lower() for v in (icp.get("want_signals") or [])}
+    present |= {str(v).replace("_", " ").strip().lower() for v in (icp.get("icp_tags") or [])}
+
+    out = []
+    for phrase in _ICP_SUGGESTION_POOL:
+        if phrase.strip().lower() not in present:
+            out.append(phrase)
+        if len(out) >= limit:
+            break
+    return out

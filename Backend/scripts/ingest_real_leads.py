@@ -88,6 +88,8 @@ def main_ingest() -> int:
             "current_status": str(row["Current_Status"]).strip(),
             "contact_ids": [],
         }
+        import api_adapters  # real RAG-matched solicitation angle, persisted (C13)
+        record["angle"] = api_adapters.real_angle_for_record(record)
         crm_store.upsert_lead(record)
         persisted.append((record["company"], domain, icp_count, round(win_prob, 2)))
 

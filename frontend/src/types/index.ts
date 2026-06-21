@@ -29,6 +29,7 @@ export interface Lead {
   stage: LifecycleStage;
   tags: string[]; // ICP tags this lead matched
   winProb?: number; // 0-1, from compute_win_prob (catalog-sourced)
+  angleTier?: 1 | 2 | 3 | 4 | null; // RAG-matched solicitation-angle tier (null until discovered with an angle)
 }
 
 /**
@@ -67,6 +68,10 @@ export interface IcpDocument {
   keywords: string[];
   industryVerticals: string[];
   geographicFocus: string[];
+  /** Company size band, e.g. "Mid-Market" / "Enterprise" (drives the discovery seed). */
+  sizeBand: string;
+  /** Canonical ICP tags (== backend _ICP_TAGS keys) — these drive per-lead ICP scoring. */
+  icpTags: string[];
   qualificationCriteria: { criterion: string; importance: "High" | "Medium" | "Low" }[];
   anchorCompanies: { name: string; domain: string; why: string }[];
 }

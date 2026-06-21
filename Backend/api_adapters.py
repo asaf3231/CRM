@@ -149,6 +149,9 @@ def crm_lead_to_ui(record: dict) -> dict:
         "stage": record.get("stage", "discovered"),
         "tags": tags,
         "winProb": win_prob,
+        # Real RAG-matched angle tier (C14) — persisted at qualify-time (C13); None until a lead is
+        # (re)discovered with an angle. The leads table renders a Tier chip only when present.
+        "angleTier": (record["angle"].get("tier") if isinstance(record.get("angle"), dict) else None),
         # contact_ids intentionally OMITTED (INTG5)
         # corporate_access_key intentionally OMITTED (INTG5 / G4)
         # updated_at intentionally OMITTED
@@ -159,44 +162,87 @@ def crm_lead_to_ui(record: dict) -> dict:
 # crm_lead_to_detail — CRM record → LeadDetail (camelCase) (lead-detail drawer)
 # ---------------------------------------------------------------------------
 
-# win_prob → angle Tier bands (deterministic; mirrors the 1..4 scale the FE
-# TierBadge renders). This is a DERIVED view of the record's own win_prob, NOT a
-# live match_solicitation_angle RAG result (which needs a crawl). Highest band wins.
-_ANGLE_TIER_BANDS = ((0.75, 1), (0.50, 2), (0.25, 3))
+# ---------------------------------------------------------------------------
+# Real solicitation angle (C12) — call the graded match_solicitation_angle RAG
+# engine (Chroma + BM25 + RRF over angle_corpus.json — fully LOCAL, no API keys),
+# fed a DETERMINISTIC narrative composed from the record's own catalog/ICP fields.
+# The engine takes any narrative string (the old "needs a live crawl" belief was
+# wrong); main/rag_engine are imported lazily and CALLED, never modified.
+# ---------------------------------------------------------------------------
+
+# Honest Tier-4 (No Match) angle — never fabricate a hook (Policy 6 spirit).
+_NO_ANGLE = {
+    "title": "No strong angle yet",
+    "tier": 4,
+    "rationale": "No crisis-case-study angle scored above the match threshold for this brand's profile.",
+    "angle_key": "no_match",
+}
 
 
-def _derive_angle(win_prob: float, gov: str, tags: list, incidents: int, icp_count: int) -> dict:
-    """Derive a deterministic LeadAngle from the record's REAL signals.
+def compose_angle_narrative(record: dict) -> tuple:
+    """Build a deterministic (narrative, category_path) for match_solicitation_angle from the record's
+    OWN catalog/ICP fields — no live crawl, no keys (Policy 1: no invented facts)."""
+    profile = record.get("profile", {}) if isinstance(record.get("profile"), dict) else {}
+    company = record.get("company", "") or record.get("domain", "") or "This brand"
+    category_path = str(profile.get("category_path", "") or "")
+    incidents = record.get("historical_social_incidents", 0)
+    icp_count = record.get("icp_count", 0)
+    tags = profile.get("icp_tags", []) if isinstance(profile, dict) else []
+    tag_str = ", ".join(str(t).replace("_", " ") for t in tags) if tags else ""
+    win_prob = record.get("win_prob", 0.0)
 
-    Honest derivation — no invented external facts:
-      - tier is banded from the record's own win_prob,
-      - title is categorised from its GovBand (same spirit as gov_band/fit_grade),
-      - rationale quotes the actual ICP-tag / incident / win-prob numbers.
-    The true RAG-matched angle requires a live crawl + match_solicitation_angle run.
+    parts = [f"{company} is a {category_path} brand" if category_path else f"{company} is a DTC brand"]
+    if incidents:
+        parts.append(
+            f"with {incidents} historical social-media / PR incident(s) and brand-safety / reputation crisis exposure"
+        )
+    parts.append(f"{icp_count} ICP signal(s) matched" + (f" ({tag_str})" if tag_str else ""))
+    if win_prob:
+        parts.append(f"win probability {round(win_prob * 100)}%")
+    return "; ".join(parts) + ".", category_path
 
-    Returns a LeadAngle dict: {title, tier (1..4), rationale}.
-    """
-    tier = 4
-    for floor, t in _ANGLE_TIER_BANDS:
-        if win_prob >= floor:
-            tier = t
-            break
 
-    if gov == "Heavy Gov":
-        title = "Crisis-narrative brand-safety angle"
-    elif gov == "Light Gov":
-        title = "Reputation-watch angle"
-    else:
-        title = "Growth-performance angle"
+def _angle_title(angle_key: str) -> str:
+    """Human title from a corpus angle_key, e.g. 'crisis_social_media_001' → 'Crisis: Social Media'."""
+    if not angle_key or angle_key == "no_match":
+        return "No strong angle yet"
+    base = str(angle_key).rstrip("0123456789").rstrip("_")  # drop a trailing _001
+    words = base.replace("_", " ").split()
+    if words and words[0].lower() == "crisis":
+        return "Crisis: " + " ".join(w.capitalize() for w in words[1:])
+    return " ".join(w.capitalize() for w in words)
 
-    tag_str = ", ".join(tags) if tags else "no ICP tags"
-    rationale = (
-        f"Derived from CRM signals — {icp_count} ICP tag(s) matched ({tag_str}); "
-        f"{incidents} historical social incident(s) ({gov}); "
-        f"win probability {round(win_prob * 100)}%. "
-        f"The RAG-matched angle is computed on a live crawl (match_solicitation_angle)."
-    )
-    return {"title": title, "tier": tier, "rationale": rationale}
+
+def real_angle_for_record(record: dict) -> dict:
+    """The REAL RAG-matched solicitation angle for a lead — calls main.match_solicitation_angle
+    (Chroma+BM25+RRF, local, no keys) on a deterministic narrative. Replaces the win-prob heuristic.
+    Tier 4 (No Match) → honest 'No strong angle yet'. Returns {title, tier (1..4), rationale, angle_key}.
+    main/rag imported lazily (ENV4); the graded tool is CALLED, never modified."""
+    narrative, category_path = compose_angle_narrative(record)
+    try:
+        import main  # lazy — rag_engine builds Chroma on first use, not at import
+        result = main.match_solicitation_angle(narrative, category_path)
+    except Exception:  # noqa: BLE001 — never crash the adapter
+        return dict(_NO_ANGLE)
+
+    angle_key = result.get("angle_key", "no_match")
+    tier = result.get("tier", 4)
+    if tier >= 4 or angle_key == "no_match":
+        return dict(_NO_ANGLE)
+
+    rrf = (result.get("scores") or {}).get("top_rrf_score", 0.0)
+    incidents = record.get("historical_social_incidents", 0)
+    icp_count = record.get("icp_count", 0)
+    return {
+        "title": _angle_title(angle_key),
+        "tier": tier,
+        "rationale": (
+            f"RAG-matched to crisis case study '{angle_key}' (Tier {tier}, RRF {round(rrf, 4)}) on this "
+            f"brand's profile — {category_path or 'DTC'}, {incidents} historical incident(s), "
+            f"{icp_count} ICP signal(s)."
+        ),
+        "angle_key": angle_key,
+    }
 
 
 def crm_lead_to_detail(record: dict) -> dict:
@@ -224,7 +270,10 @@ def crm_lead_to_detail(record: dict) -> dict:
     incidents = record.get("historical_social_incidents", 0)
 
     base["contacts"] = []  # Policy-4 gate not satisfied by the API → no private contacts revealed
-    base["angle"] = _derive_angle(win_prob, base["gov"], base["tags"], incidents, icp_count)
+    # Real RAG-matched angle: use the value persisted at qualify-time (C13) when present, else compute now.
+    persisted = record.get("angle") if isinstance(record.get("angle"), dict) else None
+    a = persisted if (persisted and persisted.get("tier")) else real_angle_for_record(record)
+    base["angle"] = {"title": a.get("title", ""), "tier": a.get("tier", 4), "rationale": a.get("rationale", "")}
     base["brief"] = (
         f"{base['company']} ({base['domain']}) is a {base['kind']} lead at the "
         f"'{base['stage']}' stage. {base['fit']} ICP fit "
@@ -278,9 +327,64 @@ def icp_doc_to_ui(seed: dict) -> dict:
         "keywords": want_signals,
         "industryVerticals": [vertical],
         "geographicFocus": [geo],
+        "sizeBand": size_band,
+        "icpTags": seed.get("icp_tags", []),
         "qualificationCriteria": qualification_criteria,
         "anchorCompanies": anchor_companies,
     }
+
+
+# ---------------------------------------------------------------------------
+# ui_to_icp_doc — reverse of icp_doc_to_ui: UI IcpDocument → storage ICP fields
+# (CONN13 — ICP authoring write path)
+# ---------------------------------------------------------------------------
+
+def ui_to_icp_doc(ui: dict) -> dict:
+    """Map a (possibly partial) UI IcpDocument (camelCase) → storage-shaped ICP fields.
+
+    The inverse of icp_doc_to_ui. **Partial-safe:** emits a storage key ONLY for a UI key
+    that is present, so a partial edit merges cleanly via api_seed.upsert_icp_document.
+
+        title              → vertical
+        keywords           → want_signals
+        geographicFocus[0] → geo
+        sizeBand           → size_band
+        icpTags            → icp_tags
+        anchorCompanies    → anchor_companies
+        qualificationCriteria "Avoid: X" items → avoid_signals (prefix stripped)
+
+    The non-"Avoid:" qualificationCriteria items are a forward-only display echo of
+    want_signals (which round-trips via `keywords`), so they are ignored on the reverse.
+    `description`/`industryVerticals`/`source`/`id` are forward-derived and ignored here.
+
+    Args:
+        ui: a UI IcpDocument dict (may contain only the edited keys).
+
+    Returns:
+        dict of storage-shaped ICP fields (a subset of the SEED_ICP keys).
+    """
+    out: dict = {}
+    if "title" in ui:
+        out["vertical"] = ui["title"]
+    if "keywords" in ui:
+        out["want_signals"] = list(ui["keywords"] or [])
+    if "geographicFocus" in ui:
+        geos = ui["geographicFocus"] or []
+        out["geo"] = geos[0] if geos else ""
+    if "sizeBand" in ui:
+        out["size_band"] = ui["sizeBand"]
+    if "icpTags" in ui:
+        out["icp_tags"] = list(ui["icpTags"] or [])
+    if "anchorCompanies" in ui:
+        out["anchor_companies"] = ui["anchorCompanies"] or []
+    if "qualificationCriteria" in ui:
+        avoid = []
+        for c in ui["qualificationCriteria"] or []:
+            crit = c.get("criterion", "") if isinstance(c, dict) else ""
+            if isinstance(crit, str) and crit.startswith("Avoid: "):
+                avoid.append(crit[len("Avoid: "):])
+        out["avoid_signals"] = avoid
+    return out
 
 
 # ---------------------------------------------------------------------------

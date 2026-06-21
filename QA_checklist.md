@@ -404,6 +404,50 @@ Driven by `FakeReasoningClient`.
   on a missing/invalid `DISCOVERY_TOKEN`, 409 while a run holds the single-job lock; 404 on an unknown job id;
   no `corporate_access_key` in any job body. Import-safety preserved (`pipeline_runner` lazy; ENV4).
 
+> **Phase 6 — Real ICP: authoring + ICP-driven discovery (C7–C10, 2026-06-20).** Make the ICP an
+> operator-authored, persistent document that demonstrably drives the search/scoring — everything
+> EXCEPT the 4 live vars (`ANTHROPIC_API_KEY`/`FIRECRAWL_API_KEY`/`ENABLE_LIVE`/`DISCOVERY_TOKEN`).
+> All offline/deterministic; the graded gate stays byte-stable.
+
+- `CONN13` **ICP write/persist (C7):** `PUT /api/icp` maps the UI IcpDocument → storage shape
+  (`api_adapters.ui_to_icp_doc`) and merge-persists via `api_seed.upsert_icp_document` (unsent fields
+  preserved); a follow-up `GET /api/icp` reflects the edit; `sizeBand`/`icpTags` + `"Avoid: "` criteria
+  round-trip. Survives a restart (live `skipif`-gated).
+- `CONN14` **ICP write validation (C7):** a malformed body → structured 4xx (never 500); no
+  `corporate_access_key` in the response; `api_seed._icp_collection` stays lazy (ENV4).
+- `CONN15` **ICP drives queries (C8):** `pipeline_runner.compose_icp_query_terms` folds the FULL ICP
+  (vertical + want_signals + icp_tags + size_band + geo) into the discovery seed; changing any field
+  changes the seed; empty ICP → safe fallback.
+- `CONN16` **ICP drives scoring (C8):** `canonicalize_icp_tags` aligns ICP tags → canonical `_ICP_TAGS`
+  keys so `icp_fit` overlaps the live crawl signals (was always 0); `icp_score` rewards overlap, penalizes
+  avoid matches, bounded [0,1]; `run_discovery` ranks `qualified`/`saved` by it.
+- `CONN17` **Graded gate untouched (C8):** `_ICP_TAGS`/`evaluate_icp_tags`/`ICP_TAG_THRESHOLD` byte-stable
+  (`main.py` 0-diff vs HEAD); every alias target ⊆ `_ICP_TAGS.keys()`; tool count 10; the ≥3 gate still
+  passes ≥3 / fails <3.
+- `CONN18` **Deterministic suggestions (C9):** `GET /api/icp/suggestions` returns additive, key-free
+  phrases NOT already in the active ICP (no LLM); deterministic; reflects the persisted doc.
+- `CONN19` **FE authoring round-trip (C10, Preview-MCP):** edit in `/icp` → Save → reload → the edit
+  persists (served from the backend); `tsc --noEmit` clean.
+
+> **Phase 7 — Real Solicitation Angle (C12–C15, 2026-06-20).** The outreach value-hook (SLED Layer 4)
+> was a win-prob heuristic (`_derive_angle`) while the real `match_solicitation_angle` RAG engine
+> (Chroma+BM25+RRF, **fully local, no keys**) sat unused. Make it real — key-free; graded engine
+> (`main.py`/`rag_engine.py`/`angle_corpus.json`) byte-stable (CALLED, never modified).
+
+- `CONN20` **Real angle (C12):** `real_angle_for_record` composes a deterministic narrative from the
+  record's catalog/ICP fields and calls `match_solicitation_angle` → a real corpus `angle_key` + RRF tier
+  + rationale (NOT one of the 3 win-prob heuristic titles); deterministic; Tier 4 → honest "No strong
+  angle yet"; sparse record graceful.
+- `CONN21` **Graded engine untouched (C12):** tool count 10; `match_solicitation_angle` still the dispatch
+  entry; `crm_lead_to_detail` still emits exactly the `{title, tier, rationale}` LeadAngle shape; ENV4
+  (rag lazy).
+- `CONN22` **Angle persisted at qualify-time (C13):** a qualified catalog lead persists
+  `record["angle"]={title,tier,rationale,angle_key}`; the discovery `saved`/`qualified` output carries the
+  tier; deterministic; no `corporate_access_key` in any job body.
+- `CONN23` **Tier surfaced (C14, Preview-MCP):** `/api/leads` carries `angleTier`; the leads table shows an
+  Angle/Tier column; the lead drawer renders the real RAG angle (its source `GET /api/leads/{id}` serves the
+  matched angle, not the heuristic); `tsc --noEmit` clean.
+
 > **Live data note (2026-06-20):** `brands_catalog.csv` was extended with a real athleisure brand universe
 > (Alo Yoga, Vuori, Fabletics, … — 18 rows alongside the 12 synthetic) so live-crawled brands match the
 > catalog and persist under Policy 1. `scripts/ingest_real_leads.py` runs the real pipeline tools

@@ -481,7 +481,7 @@ class TestINTG5AdapterThresholds:
             "contact_ids": [],
         }
         result = crm_lead_to_ui(record)
-        expected_keys = {"id", "company", "domain", "score", "fit", "gov", "kind", "stage", "tags", "winProb"}
+        expected_keys = {"id", "company", "domain", "score", "fit", "gov", "kind", "stage", "tags", "winProb", "angleTier"}
         assert set(result.keys()) == expected_keys, (
             f"Unexpected keys: {set(result.keys())} vs expected {expected_keys}"
         )
@@ -804,18 +804,23 @@ class TestINTG6IcpEndpoints:
             f"Expected 200, got {response.status_code}. Body: {response.text!r}"
         )
 
-    def test_get_icp_suggestions_equals_seed_want_signals(self):
-        """GET /api/icp/suggestions → == SEED_ICP['want_signals']."""
+    def test_get_icp_suggestions_additive_and_deterministic(self):
+        """GET /api/icp/suggestions → deterministic, additive phrases NOT in the ICP (C9 / CONN18).
+
+        Replaces the old contract (which echoed want_signals). Suggestions are now genuine
+        additions an operator hasn't picked yet.
+        """
         from fastapi.testclient import TestClient
         import api_server
         import api_seed
 
         with TestClient(api_server.app) as client:
-            response = client.get("/api/icp/suggestions")
-        data = response.json()
-        assert data == api_seed.SEED_ICP["want_signals"], (
-            f"Expected {api_seed.SEED_ICP['want_signals']!r}, got {data!r}"
-        )
+            a = client.get("/api/icp/suggestions").json()
+            b = client.get("/api/icp/suggestions").json()
+        assert a == b, "suggestions must be deterministic"
+        assert isinstance(a, list) and len(a) > 0, "suggestions must be non-empty for the seed ICP"
+        present = {s.lower() for s in api_seed.SEED_ICP["want_signals"]}
+        assert not (present & {s.lower() for s in a}), f"suggestions echo existing want_signals: {a}"
 
     def test_icp_doc_to_ui_qualification_criteria_want_is_high(self):
         """icp_doc_to_ui: each want_signal gets importance='High'."""
@@ -1315,17 +1320,21 @@ class TestCONN9IcpDurableSubstrate:
         # SEED_ICP constant is untouched by the edit (we copied on seed).
         assert api_seed.SEED_ICP["vertical"] == "Athleisure"
 
-    def test_conn9_suggestions_from_persisted_doc(self):
-        """/api/icp/suggestions reflects the persisted doc's want_signals, not the constant."""
+    def test_conn9_suggestions_reflect_persisted_doc(self):
+        """/api/icp/suggestions reads the PERSISTED doc: a phrase added to want_signals drops out (C9)."""
         from fastapi.testclient import TestClient
         import api_server
         import api_seed
 
         with TestClient(api_server.app) as client:
+            before = client.get("/api/icp/suggestions").json()
+            assert "Shopify storefront" in before, "expected a pool suggestion in the baseline"
+            # Persist it into want_signals → it must no longer be suggested (proves it reads the doc).
             api_seed.get_icp_collection().update_one(
-                {}, {"$set": {"want_signals": ["edited signal"]}}
+                {}, {"$set": {"want_signals": ["Shopify storefront"]}}
             )
-            assert client.get("/api/icp/suggestions").json() == ["edited signal"]
+            after = client.get("/api/icp/suggestions").json()
+        assert "Shopify storefront" not in after
 
     def test_conn9_empty_collection_falls_back_to_seed(self):
         """No lifespan → empty collection → /api/icp falls back to SEED_ICP (200, never empty)."""
@@ -1382,3 +1391,172 @@ class TestCONN10IcpRestartDurability:
                 api_seed.get_icp_collection().drop()
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# CONN13 / CONN14 — PUT /api/icp: ICP authoring & persistence (C7)
+# ---------------------------------------------------------------------------
+
+class TestCONN13PutIcp:
+    """CONN13: PUT /api/icp persists an edit; a follow-up GET reflects it; merge-preserve."""
+
+    def test_put_icp_returns_200_and_saved_doc(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"title": "Premium Skincare"})
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text!r}"
+        assert resp.json()["title"] == "Premium Skincare"
+
+    def test_put_icp_persists_and_get_reflects(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put("/api/icp", json={"title": "Premium Skincare", "geographicFocus": ["Europe"]})
+            got = client.get("/api/icp").json()
+        assert got["title"] == "Premium Skincare"
+        assert got["geographicFocus"] == ["Europe"]
+
+    def test_put_icp_merge_preserves_unsent_fields(self):
+        """A partial edit (only title) must NOT drop anchorCompanies / keywords."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            before = client.get("/api/icp").json()
+            client.put("/api/icp", json={"title": "Changed Vertical"})
+            after = client.get("/api/icp").json()
+        assert after["title"] == "Changed Vertical"
+        assert after["anchorCompanies"] == before["anchorCompanies"], "anchors dropped on partial edit"
+        assert after["keywords"] == before["keywords"], "keywords dropped on partial edit"
+
+    def test_put_icp_round_trips_size_and_tags(self):
+        """sizeBand + icpTags survive the UI→storage→UI round trip (forward adapter extended)."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put("/api/icp", json={"sizeBand": "Enterprise", "icpTags": ["ecommerce_dtc", "ad_spend_signals"]})
+            got = client.get("/api/icp").json()
+        assert got["sizeBand"] == "Enterprise"
+        assert got["icpTags"] == ["ecommerce_dtc", "ad_spend_signals"]
+
+    def test_put_icp_avoid_criterion_round_trips(self):
+        """qualificationCriteria 'Avoid: X' → avoid_signals → back to 'Avoid: X' on GET."""
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            client.put(
+                "/api/icp",
+                json={"qualificationCriteria": [{"criterion": "Avoid: B2B focus", "importance": "Low"}]},
+            )
+            got = client.get("/api/icp").json()
+        crits = [c["criterion"] for c in got["qualificationCriteria"]]
+        assert "Avoid: B2B focus" in crits
+
+
+class TestCONN14PutIcpValidation:
+    """CONN14: malformed body → 4xx (never 500); no secret leak; ENV4 / import-safe."""
+
+    def test_put_icp_malformed_body_is_4xx_not_500(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"keywords": "should-be-a-list-not-a-string"})
+        assert 400 <= resp.status_code < 500, f"Expected 4xx, got {resp.status_code}: {resp.text!r}"
+
+    def test_put_icp_no_corporate_access_key_in_response(self):
+        from fastapi.testclient import TestClient
+        import api_server
+
+        with TestClient(api_server.app) as client:
+            resp = client.put("/api/icp", json={"title": "X"})
+        assert "corporate_access_key" not in json.dumps(resp.json())
+
+    def test_upsert_icp_document_exists_and_collection_stays_lazy(self):
+        """api_seed.upsert_icp_document exists; merely importing/referencing builds no client (ENV4)."""
+        import api_seed
+        api_seed._icp_collection = None
+        assert hasattr(api_seed, "upsert_icp_document")
+        assert api_seed._icp_collection is None  # not built by import / attribute access
+
+
+# ---------------------------------------------------------------------------
+# CONN20 / CONN21 — real solicitation angle (C12): RAG engine, not heuristic
+# ---------------------------------------------------------------------------
+
+_HEURISTIC_TITLES = {
+    "Crisis-narrative brand-safety angle", "Reputation-watch angle", "Growth-performance angle",
+}
+
+
+class TestCONN20RealAngle:
+    """CONN20: real_angle_for_record uses the RAG engine (real corpus angle_key), not the win-prob heuristic."""
+
+    def test_crisis_record_gets_real_corpus_angle(self):
+        import api_adapters
+
+        record = {
+            "company": "Northwind Athletics", "domain": "northwind.com",
+            "profile": {"category_path": "Apparel > Athleisure > Sustainable",
+                        "icp_tags": ["ecommerce_dtc", "paid_social_advertising"]},
+            "historical_social_incidents": 6, "icp_count": 4, "win_prob": 0.8,
+        }
+        angle = api_adapters.real_angle_for_record(record)
+        assert angle["tier"] in (1, 2, 3, 4)
+        assert "angle_key" in angle
+        assert angle["title"] not in _HEURISTIC_TITLES, "still returning the old win-prob heuristic title"
+
+    def test_real_angle_is_deterministic(self):
+        import api_adapters
+
+        record = {"company": "X", "profile": {"category_path": "Apparel > Athleisure"},
+                  "historical_social_incidents": 5, "icp_count": 3, "win_prob": 0.7}
+        assert api_adapters.real_angle_for_record(record) == api_adapters.real_angle_for_record(record)
+
+    def test_compose_narrative_includes_real_fields(self):
+        import api_adapters
+
+        narrative, cat = api_adapters.compose_angle_narrative({
+            "company": "AcmeCo",
+            "profile": {"category_path": "Apparel > Athleisure", "icp_tags": ["ecommerce_dtc"]},
+            "historical_social_incidents": 7, "icp_count": 3,
+        })
+        assert "AcmeCo" in narrative and "Apparel > Athleisure" in narrative and "7" in narrative
+        assert cat == "Apparel > Athleisure"
+
+    def test_sparse_record_is_graceful(self):
+        import api_adapters
+
+        angle = api_adapters.real_angle_for_record({"company": "Z"})
+        assert angle["tier"] in (1, 2, 3, 4)
+        assert isinstance(angle["title"], str) and angle["title"]
+        assert isinstance(angle["rationale"], str) and angle["rationale"]
+
+
+class TestCONN21GradedEngineUntouched:
+    """CONN21: C12 only CALLS the angle engine — graded tool surface byte-stable."""
+
+    def test_tool_count_still_10(self):
+        import main
+        assert len(main.TOOL_SCHEMAS) == 10 and len(main.TOOL_DISPATCH) == 10
+
+    def test_match_solicitation_angle_still_dispatch_entry(self):
+        import main
+        assert main.TOOL_DISPATCH.get("match_solicitation_angle") is main.match_solicitation_angle
+
+    def test_lead_detail_angle_shape_preserved(self):
+        """crm_lead_to_detail still emits EXACTLY the LeadAngle shape {title, tier, rationale}."""
+        import api_adapters
+
+        detail = api_adapters.crm_lead_to_detail({
+            "company": "X", "domain": "x.com", "uniq_id": "u1",
+            "profile": {"category_path": "Apparel > Athleisure"},
+            "historical_social_incidents": 5, "icp_count": 3, "win_prob": 0.6,
+        })
+        assert set(detail["angle"].keys()) == {"title", "tier", "rationale"}
+        assert detail["angle"]["tier"] in (1, 2, 3, 4)

@@ -92,6 +92,23 @@ class FindMoreRequest(BaseModel):
     target: int = 10
 
 
+class IcpUpdate(BaseModel):
+    """Request body for PUT /api/icp (CONN13). Mirrors the FE IcpDocument (camelCase).
+
+    All fields optional so a partial edit merges into the stored doc (merge-preserve);
+    only the keys the client sends are updated, the rest are preserved server-side.
+    """
+    title: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    industryVerticals: Optional[List[str]] = None
+    geographicFocus: Optional[List[str]] = None
+    sizeBand: Optional[str] = None
+    icpTags: Optional[List[str]] = None
+    qualificationCriteria: Optional[List[dict]] = None
+    anchorCompanies: Optional[List[dict]] = None
+
+
 # ---------------------------------------------------------------------------
 # Routes — Stage I1 scaffold
 # ---------------------------------------------------------------------------
@@ -230,14 +247,34 @@ async def get_icp() -> dict:
 
 @app.get("/api/icp/suggestions")
 async def get_icp_suggestions() -> list:
-    """INTG6 / CONN9: GET /api/icp/suggestions → list[str].
+    """INTG6 / CONN9 / CONN18: GET /api/icp/suggestions → list[str].
 
-    Returns the want_signals from the persisted ICP document (not the static
-    SEED_ICP constant). api_seed imported lazily.
+    Returns DETERMINISTIC, additive ICP keyword suggestions — phrases NOT already in the
+    active ICP (no LLM / no keys). Reflects the persisted doc (api_seed.icp_suggestions).
     """
     import api_seed  # lazy
 
-    return api_seed.get_icp_document().get("want_signals", [])
+    return api_seed.icp_suggestions()
+
+
+@app.put("/api/icp")
+async def update_icp(body: IcpUpdate) -> dict:
+    """CONN13: PUT /api/icp → persist an edited ICP, return the saved IcpDocument.
+
+    Maps the UI IcpDocument (camelCase) back to storage shape (api_adapters.ui_to_icp_doc),
+    merge-persists it into the durable `icp_documents` collection
+    (api_seed.upsert_icp_document — merge-preserve), and returns the saved doc via
+    icp_doc_to_ui so the client gets exactly what a subsequent GET /api/icp would serve.
+    Only the fields the client sent are updated; the rest are preserved. The ICP carries
+    no private contact fields (no Policy-4 gate). api_seed/api_adapters imported lazily (INTG1).
+    """
+    import api_seed       # lazy
+    import api_adapters   # lazy
+
+    ui = {k: v for k, v in body.model_dump().items() if v is not None}
+    storage_fields = api_adapters.ui_to_icp_doc(ui)
+    saved = api_seed.upsert_icp_document(storage_fields)
+    return api_adapters.icp_doc_to_ui(saved)
 
 
 # ---------------------------------------------------------------------------

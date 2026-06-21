@@ -41,6 +41,16 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+async function putJSON<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${BASE_URL}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`PUT ${path} failed: ${r.status} ${r.statusText}`);
+  return r.json() as Promise<T>;
+}
+
 export const api = {
   // ─── Leads (WIRED → backend) ────────────────────────────────────────────────
   getLeads(): Promise<Lead[]> {
@@ -66,6 +76,11 @@ export const api = {
 
   getIcpSuggestions(): Promise<string[]> {
     return getJSON<string[]>("/icp/suggestions");
+  },
+
+  /** Persist an edited ICP (PUT /api/icp) → the saved IcpDocument (merge-preserve server-side). */
+  saveIcpDocument(doc: Partial<IcpDocument>): Promise<IcpDocument> {
+    return putJSON<IcpDocument>("/icp", doc);
   },
 
   // ─── Outreach Center (WIRED → backend) ──────────────────────────────────────
